@@ -1,0 +1,110 @@
+# Soybean Crop Parameters
+# Converted from Fortran Soy_param_cal.txt
+# Key names match Julia CropParameters struct field names
+
+[crop_parameters]
+# ===== Photosynthesis =====
+respiration_coeff = 0.015          # Fortran: RESPCP
+quantum_efficiency = 0.425         # Fortran: EFFCON
+a_theta = 0.98                     # Collatz coupling parameter (limit_Rubisco, limit_RuBP); Fortran: ATHETA
+b_theta = 0.95                     # Collatz coupling parameter (limit_both, limit_PEP); Fortran: BTHETA
+m_H2O = 9.0                        # Ball-Berry slope; Fortran: MH2O
+b_H2O = 0.01                       # Ball-Berry intercept; Fortran: BH2O
+
+# ===== Radiation =====
+k_nitrogen = 0.11                  # nitrogen extinction coefficient; Fortran: KN
+leaf_PAR_reflectance = 0.105       # Fortran: RLFV
+leaf_PAR_transmittance = 0.07      # Fortran: TLFV
+leaf_NIR_reflectance = 0.58        # Fortran: RLFN
+leaf_NIR_transmittance = 0.25      # Fortran: TLFN
+
+# ===== Development =====
+half_progress = 0.587              # DVS at heading; Fortran: hDVS
+needs_vernalization = 0            # 0=no; Fortran: VN
+base_temp = 10.0                   # [°C]; Fortran: TB
+optimal_temp = 27.0                # [°C]; Fortran: TO
+ceiling_temp = 34.0                # [°C]; Fortran: TH
+vernalization_saturation = 60.0
+
+# ===== Biomass conversion fractions [kg(C)/kg(tissue)] =====
+k_leaf_convert = 0.871             # Fortran: CFLF
+k_stem_convert = 0.810             # Fortran: CFST
+k_root_convert = 0.857             # Fortran: CFRT
+k_grain_convert = 0.759            # Fortran: CFSO
+
+# ===== Partitioning: Shoot (root fraction) =====
+shoot_progress_1 = 0.0             # Fortran: RTX
+shoot_alloc_ratio_1 = 0.5          # Fortran: RTY
+shoot_progress_2 = 1.0             # Fortran: RTX2
+
+# ===== Partitioning: Leaf =====
+leaf_alloc_ratio_0 = 0.38          # Fortran: LEVY0
+leaf_progress_1 = 0.25             # Fortran: LEVX1
+leaf_alloc_ratio_1 = 0.6           # Fortran: LEVY1
+leaf_progress_2 = 0.659            # Fortran: LEVX2
+leaf_alloc_ratio_2 = 0.0           # Fortran: LEVY2
+
+# ===== Partitioning: Panicle (grain) =====
+panicle_progress_1 = 0.53          # Fortran: PNCLX1
+panicle_alloc_ratio_1 = 0.0        # Fortran: PNCLY1
+panicle_progress_2 = 0.72          # Fortran: PNCLX2
+panicle_alloc_ratio_2 = 1.0        # Fortran: PNCLY2
+panicle_progress_3 = 1.0           # Fortran: PNCLX3
+panicle_alloc_ratio_3 = 1.0        # Fortran: PNCLY3
+
+# ===== Partitioning: Dead leaf =====
+dead_progress_1 = 0.6              # Fortran: DLVX1
+dead_ratio_1 = 0.0                 # Fortran: DLVY1
+dead_progress_2 = 1.0              # Fortran: DLVX2
+dead_ratio_2 = 0.0000010           # Fortran: DLVY2
+dead_progress_3 = 2.0              # Fortran: DLVX3
+dead_ratio_3 = 0.0000010           # Fortran: DLVY3
+
+# ===== Stem reserved starch =====
+fraction_starch_reserve = 0.18     # Fortran: FSTR
+
+# ===== Specific leaf weight (SLW) =====
+leaf_weight_asymptote = 250.0      # SLW at DVS=0 [g/m²]; Fortran: SLWYA
+leaf_weight_intercept = 600.0      # SLW asymptote [g/m²]; Fortran: SLWYB
+leaf_weight_decay_rate = 2.5       # SLW shape parameter; Fortran: SLWX
+
+# ===== Plant height =====
+# HGT = height_coeff_a1 * LAI^height_coeff_b1 before heading
+# HGT = height_coeff_a2 * LAI^height_coeff_b2 after heading
+height_coeff_a1 = 1.0              # Fortran: HGTAA
+height_coeff_a2 = -999.0           # Fortran: HGTAB (not used)
+height_coeff_b1 = -999.0           # Fortran: HGTBA (not used)
+height_coeff_b2 = -999.0           # Fortran: HGTBB (not used)
+
+# ===== Root growth =====
+root_growth_rate = 0.035           # [m/day]; Fortran: GZRT
+max_root_length = 1.7              # [m]; Fortran: MXRT
+
+# ===== Soil water stress =====
+soil_stress_param = 0.003297       # Fortran: GMMSL
+
+# ===== Specific leaf nitrogen (SLN) =====
+leaf_nitrogen_x1 = 0.15            # Fortran: SLNX1
+leaf_nitrogen_x2 = 0.4             # Fortran: SLNX2
+leaf_nitrogen_x3 = 0.659           # Fortran: SLNX3
+leaf_nitrogen_max = 3.5            # [gN/m²]; Fortran: SLNYMX
+leaf_nitrogen_min = 1.3            # [gN/m²]; Fortran: SLNYMN
+leaf_nitrogen_sensitivity = 0.004  # Fortran: SLNK
+
+# ===== Temperature damage thresholds =====
+cold_damage_threshold = 5.0        # [°C]; Fortran: TCmin
+heat_damage_threshold = 40.0       # [°C]; Fortran: THcrit
+
+# ===== Harvest =====
+harvest_index = 0.68               # Fortran: HI
+harvest_temp_threshold = 10.0      # [°C]; Fortran: HVT_TAVE
+
+# ===== Leaf loss =====
+lai_threshold_grain = 4.0          # Fortran: LLFst
+k_leaf_loss = 1.0                  # Fortran: kLLF
+
+# ===== Planting offset =====
+planting_offset = 0.0              # day offset; Fortran: PLTDIF
+
+# ===== Bulk transfer / Rubisco kinetic params (C3 photosynthesis) =====
+bulk_transfer_coeff = 0.06         # Fortran: LTCH

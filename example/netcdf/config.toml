@@ -1,0 +1,93 @@
+# Example: NetCDF spatial simulation (3-year, with management params)
+# Usage: julia src/00_matcro.jl example/netcdf/config.toml
+
+[time]
+start_year = 2021
+end_year = 2023
+start_doy = 1
+end_doy = 365
+time_step = 3600
+
+[location]
+latitude = 40.0
+
+[crop]
+crop_name = "Maize"
+param_file = "params/maize.toml"
+planting_doy = 120
+is_irrigated = 0
+
+[soil]
+soil_type = 9
+n_fertilizer = 100.0
+thermal_time_requirement = 1500.0
+
+[co2]
+fixed_ppm = 415.0
+file = "data/co2.csv"
+
+[input.netcdf]
+nthreads = 4
+lon_dim = "lon"
+lat_dim = "lat"
+time_dim = "time"
+
+# Meteorological forcing (multi-year files, 2021-2023)
+[input.netcdf.tmx]
+file = "data/netcdf/tmx.nc4"
+variable = "tmx"
+
+[input.netcdf.tmn]
+file = "data/netcdf/tmn.nc4"
+variable = "tmn"
+
+[input.netcdf.prc]
+file = "data/netcdf/prc.nc4"
+variable = "prc"
+
+[input.netcdf.rsd]
+file = "data/netcdf/rsd.nc4"
+variable = "rsd"
+
+[input.netcdf.shm]
+file = "data/netcdf/shm.nc4"
+variable = "shm"
+
+[input.netcdf.wnd]
+file = "data/netcdf/wnd.nc4"
+variable = "wnd"
+height = 10.0
+
+[input.netcdf.prs]
+file = "data/netcdf/prs.nc4"
+variable = "prs"
+
+# Management parameters (spatial NC files + default_value fallback)
+[input.netcdf.planting_doy]
+default_value = 120
+file = "data/netcdf/planting_doy.nc"
+variable = "planting_doy"
+
+[input.netcdf.is_irrigated]
+default_value = 0
+file = "data/netcdf/is_irrigated.nc"
+variable = "is_irrigated"
+
+[input.netcdf.soil_type]
+default_value = 9
+file = "data/netcdf/soil_type.nc"
+variable = "soil_type"
+
+[input.netcdf.n_fertilizer]
+default_value = 100.0
+file = "data/netcdf/n_fertilizer.nc"
+variable = "n_fertilizer"
+
+[input.netcdf.thermal_time_requirement]
+default_value = 1500.0
+file = "data/netcdf/thermal_time_requirement.nc"
+variable = "thermal_time_requirement"
+
+[output]
+directory = "output/"
+format = "netcdf"

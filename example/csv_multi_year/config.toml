@@ -1,0 +1,34 @@
+# MATCRO Multi-year CSV Example
+# Usage: julia src/00_matcro.jl example/csv_multi_year/config.toml
+
+[time]
+start_year = 2020
+end_year = 2022
+start_doy = 1
+end_doy = 365
+time_step = 3600
+
+[location]
+latitude = 38.25
+
+[crop]
+crop_name = "Maize"
+param_file = "maize.toml"
+planting_doy = 117
+is_irrigated = 1
+
+[soil]
+soil_type = 12
+n_fertilizer = 65.0
+thermal_time_requirement = 1441.0
+
+[co2]
+fixed_ppm = 438.0
+file = "co2.csv"
+
+[input.csv]
+path = "weather_data.csv"
+
+[output]
+directory = "output/"
+format = "csv"

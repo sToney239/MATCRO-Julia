@@ -1,0 +1,50 @@
+# Julia
+deps/deps.jl
+Manifest.toml
+*.jl.cov
+*.jl.*.cov
+
+# Build artifacts
+compile/
+precompile/
+
+# Output
+output/
+*.nc
+*.csv
+*.nc4
+
+# Exception: example data files should be tracked
+!example/
+!example/**
+
+# Data (user-specific, not part of repo)
+data/
+
+# Fortran (all contents, keep only source .f90/.inc)
+fortran/
+
+# Test (all contents)
+test/
+
+# Scripts (utility scripts, not part of core model)
+scripts/
+
+# Agent reference (AI-specific notes)
+AGENT.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Exception: example data files should be tracked (override *.nc, *.nc4, *.csv, data/ rules)
+!example/
+!example/**
+
+# Ignore output folders within example
+example/*/output/
+example/*/*/output/
+example/*/output_ref/
+example/*/*/output_ref/
