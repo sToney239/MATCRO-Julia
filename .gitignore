@@ -27,6 +27,8 @@ fortran/
 # Test (all contents)
 test/
 
+marp/
+
 # Scripts (utility scripts, not part of core model)
 scripts/
 

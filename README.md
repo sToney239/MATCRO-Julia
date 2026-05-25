@@ -10,7 +10,7 @@ This is the Julia version of the MATCRO crop model, originally written in Fortra
 
 ## Features of this version
 
-- **Readable variable names** replacing cryptic Fortran identifiers, making the code far easier to follow:
+- **Readable variable names** replacing original Fortran ones, making the code easier to follow:
 
   | Fortran name | Julia name | Meaning |
   |---|---|---|
@@ -19,8 +19,8 @@ This is the Julia version of the MATCRO crop model, originally written in Fortra
   | `RESPCP` | `respiration_coeff` | Leaf respiration coefficient |
 
 - **Cross-platform**: Julia runs natively on Windows, macOS, and Linux, whereas Fortran tooling on Windows is limited.
-- **Parallel-ready**: Julia provides built-in multi-core parallelism, enabling large-ensemble or multi-site simulations.
-- **Equation-referenced comments**: Code is annotated with the corresponding equation numbers from the source papers as much as possible, and combined with the readable variable names this makes it much easier to understand.
+- **Parallel computation**: Julia provides built-in multi-core parallelism, enabling large-ensemble or multi-site simulations.
+- **Equation-referenced comments**: Code is annotated with the corresponding equation numbers from the source papers as much as possible, and combined with the readable variable names this makes it easier to understand.
 
 ## Julia Setup
 
