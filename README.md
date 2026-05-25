@@ -136,4 +136,4 @@ Management parameters are specified in `[input.netcdf.<param_name>]` sections wi
 
 Priority: NC file > `default_value` > built-in default.
 
-For full details, see [CONFIG.md](CONFIG.md).
+For full details, see [README-CONFIG.md](README-CONFIG.md).
