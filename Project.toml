@@ -4,6 +4,16 @@ authors = ["MATCRO Team"]
 version = "0.1.0"
 
 [deps]
+ArchGDAL = "c9ce4bd3-00a5-5f44-8338-4c3834c1a560"
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+NCDatasets = "85f8d34a-dbdd-5d1c-b8e2-4f63c1a67c78"
+TOML = "fa267f1f-6049-4f14-a6d1-3ce5c504f12e"
 
 [compat]
+ArchGDAL = "0.10"
+CSV = "0.10"
+DataFrames = "1.6"
+NCDatasets = "0.14"
+TOML = "1.0"
 julia = "1.9"

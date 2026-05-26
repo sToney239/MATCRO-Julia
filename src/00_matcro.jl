@@ -8,8 +8,8 @@
 # ============================================================
 include("01_constants.jl")
 include("02_io.jl")
-include("02_1_io_csv.jl")
-include("02_2_io_netcdf.jl")
+include("02_1_point_io.jl")
+include("02_2_spatial_io.jl")
 include("03_hour_interpolation.jl")
 include("04_radiation.jl")
 include("05_1_photosynthesis_C3.jl")
@@ -27,6 +27,7 @@ function run_simulation(config_path::String)
     println("=" ^ 60)
     println("                   MATCRO (Julia Version)")
     println("=" ^ 60)
+    flush(stdout)
 
     # 1. Read configuration
     config = read_config(config_path)
@@ -192,7 +193,6 @@ function run_simulation(config_path::String)
                 )
 
                 # ----- PHSYN (photosynthesis → GPP, RSP, TSP) -----
-                water_stress_before_phsyn = water_stress  # save for debug output
                 phsyn_result = calc_photosynthesis(;
                     Qp_sunlit=rad_result.PAR_abs_sunlit_leaf,
                     Qp_shade=rad_result.PAR_abs_shade_leaf,
@@ -305,7 +305,7 @@ function run_simulation(config_path::String)
                 water_stress = soil_result.water_stress
 
                 # Write hourly debug output (all modules, matching Fortran debug_module_outputs.txt)
-                Printf.@printf(debug_file, "%d,%d,%.1f,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e\n",
+                #= Printf.@printf(debug_file, "%d,%d,%.1f,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e\n",
                     year, doy, hour,
                     tmp_K, rsd, shm, wnd, prs,
                     water_stress_before_phsyn, crop.LAI, crop.development_stage,
@@ -316,7 +316,7 @@ function run_simulation(config_path::String)
                     rad_result.LAI_sunlit, rad_result.LAI_shade,
                     crop.leaf_biomass, crop.stem_biomass, crop.storage_organ_biomass,
                     crop.root_biomass, crop.reserved_starch_pool,
-                    crop.available_glucose_pool, crop.dead_leaf_biomass)
+                    crop.available_glucose_pool, crop.dead_leaf_biomass) =#
 
             end # hourly loop
 
@@ -389,6 +389,7 @@ function run_spatial_simulation(config::Config)
     # 3. Year loop
     years = collect(config.start_year:config.end_year)
     yield_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
+    harvest_doy_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
 
     for (i_year, year) in enumerate(years)
         println("\n  Year $year ...")
@@ -399,15 +400,15 @@ function run_spatial_simulation(config::Config)
         n_days = length(spatial_forcing)
 
         # Read management params for this year (from NC files or defaults)
-        planting_doy = load_management_param(config, "planting_doy", year, n_lon, n_lat)
-        is_irrigated  = load_management_param(config, "is_irrigated", year, n_lon, n_lat)
-        soil_type  = load_management_param(config, "soil_type", year, n_lon, n_lat)
-        n_fertilizer  = load_management_param(config, "n_fertilizer", year, n_lon, n_lat)
-        thermal_time_requirement  = load_management_param(config, "thermal_time_requirement", year, n_lon, n_lat)
+        planting_doy = load_management_param(config, "planting_doy", year, n_lon, n_lat; lats=lats, lons=lons)
+        is_irrigated  = load_management_param(config, "is_irrigated", year, n_lon, n_lat; lats=lats, lons=lons)
+        soil_type  = load_management_param(config, "soil_type", year, n_lon, n_lat; lats=lats, lons=lons)
+        n_fertilizer  = load_management_param(config, "n_fertilizer", year, n_lon, n_lat; lats=lats, lons=lons)
+        thermal_time_requirement  = load_management_param(config, "thermal_time_requirement", year, n_lon, n_lat; lats=lats, lons=lons)
 
         # Parallel pixel loop
         indices = [(i_lon, i_lat) for i_lon in 1:n_lon for i_lat in 1:n_lat]
-        results = Vector{Float64}(undef, length(indices))
+        results = Vector{NamedTuple}(undef, length(indices))
 
         Threads.@threads for index in eachindex(indices)
             i_lon, i_lat = indices[index]
@@ -422,12 +423,13 @@ function run_spatial_simulation(config::Config)
                     Float64(thermal_time_requirement[i_lon, i_lat]);
                     i_lon=i_lon, i_lat=i_lat)
             catch
-                results[index] = NaN
+                results[index] = (yield=NaN, harvest_doy=NaN)
             end
         end
 
         for (index, (i_lon, i_lat)) in enumerate(indices)
-            yield_3d[i_lon, i_lat, i_year] = results[index]
+            yield_3d[i_lon, i_lat, i_year] = results[index].yield
+            harvest_doy_3d[i_lon, i_lat, i_year] = results[index].harvest_doy
         end
 
         valid = filter(!isnan, yield_3d[:, :, i_year])
@@ -444,19 +446,23 @@ function run_spatial_simulation(config::Config)
         for (i_year, year) in enumerate(years)
             csv_path = joinpath(config.output_dir, "yield_$(year).csv")
             open(csv_path, "w") do f
-                println(f, "lon,lat,yield")
+                println(f, "lon,lat,yield,harvest_doy")
                 for i_lon in 1:n_lon, i_lat in 1:n_lat
-                    @printf(f, "%.2f,%.2f,%.2f\n", lons[i_lon], lats[i_lat], yield_3d[i_lon, i_lat, i_year])
+                    @printf(f, "%.2f,%.2f,%.2f,%d\n", lons[i_lon], lats[i_lat], yield_3d[i_lon, i_lat, i_year], Int(harvest_doy_3d[i_lon, i_lat, i_year]))
                 end
             end
         end
-    elseif config.output_format == "netcdf"
-        out_path = joinpath(config.output_dir, "yield_spatial.nc")
-        write_output_netcdf_spatial(yield_3d[:, :, 1], lats, lons, years, out_path)
-        # Write each year slice
+    elseif config.output_format == "raster" || config.output_format == "geotiff" || config.output_format == "netcdf"
+        # Write per-year TIF (yield + harvest_doy)
         for (i_year, year) in enumerate(years)
-            write_yield_slice(out_path, year, years, yield_3d[:, :, i_year])
+            yield_path = joinpath(config.output_dir, "yield_$(year).tif")
+            harvest_path = joinpath(config.output_dir, "harvest_doy_$(year).tif")
+            write_yield_tif(yield_3d[:, :, i_year], lats, lons, year, yield_path)
+            write_harvest_doy_tif(harvest_doy_3d[:, :, i_year], lats, lons, year, harvest_path)
         end
+        # ALSO write NetCDF for comparison
+        nc_path = joinpath(config.output_dir, "yield_spatial.nc")
+        write_output_netcdf_spatial(yield_3d, lats, lons, years, nc_path)
     end
 
     println("\n" * "=" ^ 60)
@@ -617,7 +623,7 @@ function run_pixel_spatial(config::Config, params::CropParameters,
         end
     end
 
-    return crop.yield
+    return (yield=crop.yield, harvest_doy=crop.harvest_doy)
 end
 
 # Command-line entry point (skip when included from other scripts)

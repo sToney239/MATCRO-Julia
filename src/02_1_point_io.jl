@@ -1,6 +1,6 @@
 # IO_CSV — CSV-based I/O for single-point MATCRO simulation
 # Used when config.input_format = "csv"
-# Companion: io.jl (core structs), io_netcdf.jl (NetCDF I/O)
+# Companion: io.jl (core structs), io_spatial.jl (spatial NetCDF/TIF I/O)
 
 using CSV
 using DataFrames

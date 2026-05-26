@@ -225,18 +225,22 @@ function read_config(config_path::String)::Config
         for (varname, meta) in nc_cfg
             if isa(meta, Dict)
                 # Resolve file path relative to config_dir
-                if haskey(meta, "file") && haskey(meta, "variable")
+                if haskey(meta, "file")
+                    # Has a file - could be NetCDF (file + variable) or TIF (file only)
                     file_path = isabspath(meta["file"]) ? meta["file"] : joinpath(config_dir, meta["file"])
                     nc_vars[varname] = Dict{String,Any}(
                         "file" => file_path,
-                        "variable" => meta["variable"],
-                        "height" => get(meta, "height", 10.0),
-                        "scale_factor" => get(meta, "scale_factor", 1.0),
-                        "add_offset" => get(meta, "add_offset", 0.0),
                         "default_value" => get(meta, "default_value", nothing),
                     )
+                    # If also has "variable", it's a NetCDF file
+                    if haskey(meta, "variable")
+                        nc_vars[varname]["variable"] = meta["variable"]
+                        nc_vars[varname]["height"] = get(meta, "height", 10.0)
+                        nc_vars[varname]["scale_factor"] = get(meta, "scale_factor", 1.0)
+                        nc_vars[varname]["add_offset"] = get(meta, "add_offset", 0.0)
+                    end
                 elseif haskey(meta, "default_value")
-                    # Management param with default_value only (no NC file)
+                    # Management param with default_value only (no file)
                     nc_vars[varname] = Dict{String,Any}(
                         "default_value" => meta["default_value"],
                     )

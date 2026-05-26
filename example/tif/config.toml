@@ -1,5 +1,5 @@
-# Example: NetCDF spatial simulation (3-year, with management params)
-# Usage: julia src/00_matcro.jl example/netcdf/config.toml
+# Example: GeoTIFF management params + NetCDF forcing spatial simulation (3-year)
+# Usage: julia src/00_matcro.jl example/tif/config.toml
 
 [time]
 start_year = 2021
@@ -32,61 +32,56 @@ lon_dim = "lon"
 lat_dim = "lat"
 time_dim = "time"
 
-# Meteorological forcing (multi-year files, 2021-2023)
+# Meteorological forcing (shared with netcdf example, multi-year files 2021-2023)
 [input.netcdf.tmx]
-file = "data/netcdf/tmx.nc4"
+file = "../netcdf/data/netcdf/tmx.nc4"
 variable = "tmx"
 
 [input.netcdf.tmn]
-file = "data/netcdf/tmn.nc4"
+file = "../netcdf/data/netcdf/tmn.nc4"
 variable = "tmn"
 
 [input.netcdf.prc]
-file = "data/netcdf/prc.nc4"
+file = "../netcdf/data/netcdf/prc.nc4"
 variable = "prc"
 
 [input.netcdf.rsd]
-file = "data/netcdf/rsd.nc4"
+file = "../netcdf/data/netcdf/rsd.nc4"
 variable = "rsd"
 
 [input.netcdf.shm]
-file = "data/netcdf/shm.nc4"
+file = "../netcdf/data/netcdf/shm.nc4"
 variable = "shm"
 
 [input.netcdf.wnd]
-file = "data/netcdf/wnd.nc4"
+file = "../netcdf/data/netcdf/wnd.nc4"
 variable = "wnd"
 height = 10.0
 
 [input.netcdf.prs]
-file = "data/netcdf/prs.nc4"
+file = "../netcdf/data/netcdf/prs.nc4"
 variable = "prs"
 
-# Management parameters (spatial NC files + default_value fallback)
+# Management parameters (spatial TIF files + default_value fallback)
 [input.netcdf.planting_doy]
 default_value = 120
-file = "data/netcdf/planting_doy.nc"
-variable = "planting_doy"
+file = "data/tif/planting_doy.tif"
 
 [input.netcdf.is_irrigated]
 default_value = 0
-file = "data/netcdf/is_irrigated.nc"
-variable = "is_irrigated"
+file = "data/tif/is_irrigated.tif"
 
 [input.netcdf.soil_type]
 default_value = 9
-file = "data/netcdf/soil_type.nc"
-variable = "soil_type"
+file = "data/tif/soil_type.tif"
 
 [input.netcdf.n_fertilizer]
 default_value = 100.0
-file = "data/netcdf/n_fertilizer.nc"
-variable = "n_fertilizer"
+file = "data/tif/n_fertilizer.tif"
 
 [input.netcdf.thermal_time_requirement]
 default_value = 1500.0
-file = "data/netcdf/thermal_time_requirement.nc"
-variable = "thermal_time_requirement"
+file = "data/tif/thermal_time_requirement.tif"
 
 [output]
 directory = "output/"

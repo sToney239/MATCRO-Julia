@@ -1,4 +1,4 @@
-# IO_NETCDF — NetCDF-based I/O for MATCRO simulation
+# IO_SPATIAL — Spatial I/O for MATCRO simulation (NetCDF + GeoTIFF)
 # Used when config.input_format = "netcdf"
 # Supports: single-point, spatial parallel, multi-year single file
 # Companion: io.jl (core structs), io_csv.jl (CSV I/O)
@@ -8,6 +8,8 @@
 
 using NCDatasets
 using Dates
+using ArchGDAL
+import ArchGDAL as AG
 
 # ============================================================
 # read_forcing_netcdf — load one year of daily forcing for a
@@ -144,18 +146,13 @@ end
 # ============================================================
 function get_grid_info(config::Config)
     nc = config.netcdf_vars
-    # Find first variable that has a "file" key (meteorological variable, not management param)
-    first_var = nothing
-    for (k, v) in nc
-        if haskey(v, "file")
-            first_var = v
-            break
-        end
+    # Always read grid from tmx forcing file (all forcing files share the same grid)
+    # This ensures consistent lat/lon ordering regardless of management param format
+    tmx_meta = get(nc, "tmx", nothing)
+    if tmx_meta === nothing || !haskey(tmx_meta, "file")
+        error("Cannot find tmx forcing file for grid info")
     end
-    if first_var === nothing
-        error("No meteorological variable with file path found in config")
-    end
-    filepath = first_var["file"]
+    filepath = tmx_meta["file"]
 
     ds = Dataset(filepath)
     lat_var = _find_var(ds, config.lat_dim, ["lat", "latitude", "latitute"])
@@ -243,7 +240,7 @@ end
 # 4. If neither works, fall back to default_value
 # ============================================================
 function load_management_param(config::Config, param_name::String, year::Int,
-                               n_lon::Int, n_lat::Int)
+                               n_lon::Int, n_lat::Int; lats=nothing, lons=nothing)
     var_meta = get(config.netcdf_vars, param_name, nothing)
     default_val = var_meta !== nothing ? Float64(get(var_meta, "default_value", 0)) : 0.0
 
@@ -255,8 +252,27 @@ function load_management_param(config::Config, param_name::String, year::Int,
             return fill(default_val, n_lon, n_lat)
         end
 
+        # Check if file is TIF based on extension
+        if endswith(lowercase(filepath), ".tif") || endswith(lowercase(filepath), ".tiff")
+            if lats === nothing || lons === nothing
+                @warn "TIF management param requires lat/lon info, using default=$default_val"
+                return fill(default_val, n_lon, n_lat)
+            end
+            return _load_management_tif(filepath, year, lats, lons, default_val)
+        end
+
         ds = Dataset(filepath)
-        vname = var_meta["variable"]
+        vname = haskey(var_meta, "variable") ? var_meta["variable"] : param_name
+
+        # Check lat ordering in this NC file (before close)
+        nc_lat_descending = false
+        if haskey(ds, config.lat_dim) || haskey(ds, "lat") || haskey(ds, "latitude")
+            nc_lat_var = _find_var(ds, config.lat_dim, ["lat", "latitude", "latitute"])
+            nc_lat_vals = Float64.(nc_lat_var[:])
+            if length(nc_lat_vals) >= 2
+                nc_lat_descending = nc_lat_vals[1] > nc_lat_vals[2]
+            end
+        end
 
         # Try "time" first, then fallback to "year" (management params often use "year")
         time_dim = haskey(ds, config.time_dim) ? config.time_dim : (haskey(ds, "year") ? "year" : nothing)
@@ -313,10 +329,124 @@ function load_management_param(config::Config, param_name::String, year::Int,
         add_offset = Float64(get(var_meta, "add_offset", 0.0))
         data .= data .* scale_factor .+ add_offset
 
+        # Reindex lat dimension to match grid (forcing) lat ordering
+        # Management NC files may have lat descending while forcing/grid has ascending
+        # Flip when: NC is descending AND grid is ascending (or vice versa)
+        if lats !== nothing && size(data, 2) == length(lats)
+            grid_lat_ascending = lats[1] < lats[end]
+            # Flip if: (NC descending AND grid ascending) OR (NC ascending AND grid descending)
+            should_flip = (nc_lat_descending && grid_lat_ascending) || (!nc_lat_descending && !grid_lat_ascending)
+            if should_flip
+                data = data[:, end:-1:1]
+            end
+        end
+
         return data
     else
         return fill(default_val, n_lon, n_lat)
     end
+end
+
+# ============================================================
+# _load_management_tif — load management parameter from GeoTIFF
+# Handles both single-band (2D) and multi-band (3D with year) TIF
+# ============================================================
+function _load_management_tif(filepath::String, year::Int,
+                              target_lats::Vector{Float64}, target_lons::Vector{Float64},
+                              default_val::Float64)::Matrix{Float64}
+    n_lon = length(target_lons)
+    n_lat = length(target_lats)
+
+    AG.read(filepath) do dataset
+        n_bands = AG.nraster(dataset)
+
+        # Single band: use directly regardless of year
+        if n_bands == 1
+            return _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
+        end
+
+        # Multi-band: try to find year from band names
+        band_years = Int[]
+        for b in 1:n_bands
+            band = AG.getband(dataset, b)
+            desc = AG.getname(band)
+            if occursin(r"\d{4}", desc)
+                push!(band_years, parse(Int, match(r"\d{4}", desc).match))
+            end
+        end
+
+        if isempty(band_years)
+            @warn "No year metadata in TIF bands ($filepath), using band 1"
+            return _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
+        end
+
+        # Exact year match
+        exact = findall(y -> y == year, band_years)
+        if !isempty(exact)
+            return _extract_tif_band(dataset, exact[1], target_lons, target_lats, default_val)
+        elseif length(band_years) == 1
+            @warn "TIF has only one band (year $(band_years[1])), using it for year $year"
+            return _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
+        else
+            # Backward fill
+            earlier = band_years[band_years .< year]
+            if !isempty(earlier)
+                nearest_year = maximum(earlier)
+                band_idx = findall(y -> y == nearest_year, band_years)[1]
+                @warn "Year $year not found in TIF ($filepath), using nearest earlier year $nearest_year (backward fill)"
+                return _extract_tif_band(dataset, band_idx, target_lons, target_lats, default_val)
+            else
+                @warn "No suitable year in TIF ($filepath) for year $year, using default=$default_val"
+                return fill(default_val, n_lon, n_lat)
+            end
+        end
+    end
+end
+
+# ============================================================
+# _extract_tif_band — extract one band from a TIF, reproject to NC grid
+# ============================================================
+function _extract_tif_band(dataset, band_idx::Int,
+                            target_lons::Vector{Float64},
+                            target_lats::Vector{Float64},
+                            default_val::Float64)::Matrix{Float64}
+    n_lon = length(target_lons)
+    n_lat = length(target_lats)
+    band = AG.getband(dataset, band_idx)
+    tif_width = AG.width(dataset)
+    tif_height = AG.height(dataset)
+    gt = AG.getgeotransform(dataset)
+    x_origin = gt[1]; pixel_w = gt[2]
+    y_origin = gt[4]; pixel_h = gt[6]
+
+    # Bbox check
+    tif_xmin = x_origin
+    tif_xmax = x_origin + tif_width * pixel_w
+    tif_ymin = y_origin + tif_height * pixel_h
+    tif_ymax = y_origin
+
+    nc_xmin = minimum(target_lons) - (target_lons[2] - target_lons[1]) / 2
+    nc_xmax = maximum(target_lons) + (target_lons[2] - target_lons[1]) / 2
+    nc_ymin = minimum(target_lats) - (target_lats[1] - target_lats[2]) / 2
+    nc_ymax = maximum(target_lats) + (target_lats[1] - target_lats[2]) / 2
+
+    if tif_xmin > nc_xmin || tif_xmax < nc_xmax || tif_ymin > nc_ymin || tif_ymax < nc_ymax
+        @warn "Management TIF bbox does not fully cover NC grid — some pixels may use defaults"
+    end
+
+    result = fill(default_val, n_lon, n_lat)
+    # Read entire band first, then index
+    tif_data = Float64.(AG.read(band))
+    for i_lon in 1:n_lon, i_lat in 1:n_lat
+        # GeoTIFF: pixel center at (x_origin + pixel_w*(col-0.5), y_origin + pixel_h*(row-0.5))
+        col = round(Int, (target_lons[i_lon] - x_origin) / pixel_w + 0.5)
+        row = round(Int, (target_lats[i_lat] - y_origin) / pixel_h + 0.5)
+        if 1 <= col <= tif_width && 1 <= row <= tif_height
+            # tif_data is [col, row] = [lon, lat]
+            result[i_lon, i_lat] = tif_data[col, row]
+        end
+    end
+    return result
 end
 
 # ============================================================
@@ -364,7 +494,7 @@ end
 # write_output_netcdf_spatial — write spatial yield to 3D NetCDF
 # (lon, lat, year) — appends year dimension incrementally
 # ============================================================
-function write_output_netcdf_spatial(yield_map::Matrix{Float64},
+function write_output_netcdf_spatial(yield_3d::Array{Float64,3},
                                      lats::Vector{Float64},
                                      lons::Vector{Float64},
                                      years::Vector{Int},
@@ -384,8 +514,8 @@ function write_output_netcdf_spatial(yield_map::Matrix{Float64},
     defVar(ds, "yield", Float64, ("lon", "lat", "year"),
            attrib = Dict("long_name" => "crop yield", "units" => "kg/ha"))
 
-    # Initialize with NaN
-    ds["yield"][:, :, :] = fill(NaN, n_lon, n_lat, n_year)
+    # Write the actual 3D data
+    ds["yield"][:, :, :] = yield_3d
 
     close(ds)
     println("Output written to ", output_path)
@@ -404,4 +534,60 @@ function write_yield_slice(output_path::String, year::Int, years::Vector{Int},
     ds = Dataset(output_path, "a")
     ds["yield"][:, :, iy] = yield_map
     close(ds)
+end
+
+# ============================================================
+# write_yield_tif — write a 2D yield GeoTIFF for one year
+# ============================================================
+function write_yield_tif(yield_map::Matrix{Float64}, lats::Vector{Float64},
+                         lons::Vector{Float64}, year::Int, output_path::String)
+    n_lon = length(lons)
+    n_lat = length(lats)
+
+    pixel_width = lons[2] - lons[1]    # positive
+    pixel_height = lats[2] - lats[1]   # negative for north-up
+
+    AG.create(output_path; driver=AG.getdriver("GTiff"), width=n_lon, height=n_lat, nbands=1, dtype=Float64) do dataset
+        band = AG.getband(dataset, 1)
+        AG.write!(band, yield_map)
+
+        y_origin = lats[1] - pixel_height / 2
+        geo_transform = [lons[1] - pixel_width / 2, pixel_width, 0.0,
+                         y_origin, 0.0, pixel_height]
+        AG.setgeotransform!(dataset, geo_transform)
+        AG.setproj!(dataset, "EPSG:4326")
+
+        AG.setunittype!(band, "kg/ha")
+        AG.setnodatavalue!(band, NaN)
+    end
+
+    println("  Yield TIF written: ", output_path)
+end
+
+# ============================================================
+# write_harvest_doy_tif — write a 2D harvest_doy GeoTIFF for one year
+# ============================================================
+function write_harvest_doy_tif(harvest_map::Matrix{Float64}, lats::Vector{Float64},
+                               lons::Vector{Float64}, year::Int, output_path::String)
+    n_lon = length(lons)
+    n_lat = length(lats)
+
+    pixel_width = lons[2] - lons[1]
+    pixel_height = lats[2] - lats[1]
+
+    AG.create(output_path; driver=AG.getdriver("GTiff"), width=n_lon, height=n_lat, nbands=1, dtype=Int32) do dataset
+        band = AG.getband(dataset, 1)
+        AG.write!(band, Int32.(round.(harvest_map)))
+
+        y_origin = lats[1] - pixel_height / 2
+        geo_transform = [lons[1] - pixel_width / 2, pixel_width, 0.0,
+                         y_origin, 0.0, pixel_height]
+        AG.setgeotransform!(dataset, geo_transform)
+        AG.setproj!(dataset, "EPSG:4326")
+
+        AG.setunittype!(band, "day of year")
+        AG.setnodatavalue!(band, -999)
+    end
+
+    println("  Harvest DOY TIF written: ", output_path)
 end

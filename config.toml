@@ -134,4 +134,4 @@ path = "data/forcing.csv"
 
 [output]
 directory = "output/"
-format = "csv"             # "csv" or "netcdf"
+format = "csv"             # "csv" or "raster"

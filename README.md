@@ -30,14 +30,15 @@ Download Julia from [julialang.org](https://julialang.org/downloads/) (1.9 or la
 
 ### Install dependencies
 
-`NCDatasets` is the only external package you need to install (Other packages required are Julia standard libraries):
+`NCDatasets` and `ArchGDAL` are the external packages you need to install (Other packages required are Julia standard libraries):
 
 ```julia
 using Pkg
 Pkg.add("NCDatasets")
+Pkg.add("ArchGDAL")
 ```
 
-> If you only use CSV input mode, `NCDatasets` is not required.
+> If you only use CSV input mode, `NCDatasets` and `ArchGDAL` are not required.
 
 ## Quick start
 
@@ -58,14 +59,17 @@ For full configuration `toml` reference, see [README-CONFIG.md](README-CONFIG.md
 The project includes ready-to-run example datasets. Try the following commands:
 
 ```bash
-# CSV single-year simulation
+# Point simulation wit single year CSV data
 julia src/00_matcro.jl example/csv/config.toml
 
-# CSV multi-year simulation
+# Point simulation wit multi-year CSV data
 julia src/00_matcro.jl example/csv_multi_year/config.toml
 
-# NetCDF spatial simulation
+# Spatial simulation wit NetCDF weather data and NetCDF management data
 julia src/00_matcro.jl example/netcdf/config.toml
+
+# Spatial simulation wit NetCDF weather data and TIF management data
+julia src/00_matcro.jl example/tif/config.toml
 ```
 
 ### Multi-threaded parallel simulation
@@ -100,7 +104,7 @@ When using CSV input (`[input.csv]` in config.toml), your data file must have th
 
 The file must include a header row with these column names.
 
-### NetCDF Input Data Format
+### NetCDF / Raster Input Data Format
 
 When using NetCDF input (`[input.netcdf]` in config.toml), your data files must follow these format requirements:
 
@@ -129,11 +133,21 @@ Each meteorological variable (tmx, tmn, prc, rsd, shm, wnd, prs) is specified in
 
 #### Management parameters
 
-Management parameters are specified in `[input.netcdf.<param_name>]` sections with a `default_value` key. Optionally, you can also provide a spatial NC file.
+Management parameters are specified in `[input.netcdf.<param_name>]` sections with a `default_value` key. Optionally, you can also provide a spatial NC file or a GeoTIFF file.
 
-1. **Uniform default only**: set `default_value` — used for all pixels when no NC file is provided, or the file/year is not found.
+1. **Uniform default only**: set `default_value` — used for all pixels when no file is provided, or the file/year is not found.
 2. **Spatial NC file**: add `file` and `variable` keys alongside `default_value`. The file can be 2D (lon, lat) for static parameters, or 3D (lon, lat, time) with a year dimension for time-varying parameters.
+3. **Spatial TIF file**: add `file` key with a `.tif`/`.tiff` path alongside `default_value`. The TIF file can be single-band (static) or multi-band (each band = one year). Nearest-neighbor resampling is used when TIF and NC grid resolutions differ. A bbox check is performed to ensure the TIF extent covers the simulation grid.
 
-Priority: NC file > `default_value` > built-in default.
+Priority: file (NC or TIF) > `default_value` > built-in default.
 
 For full details, see [README-CONFIG.md](README-CONFIG.md).
+
+### Spatial Output Format
+
+When running NetCDF spatial simulation with `format = "raster"` (or `"geotiff"`), the model outputs **one GeoTIFF file per year** instead of a single 3D NetCDF file. Two files are generated for each simulation year:
+
+- `yield_YYYY.tif`: Crop yield (kg/ha), Float64
+- `harvest_doy_YYYY.tif`: Harvest day of year, Int32
+
+The TIF files use WGS84 (EPSG:4326) coordinate reference system, with geotransform metadata for proper geospatial alignment.

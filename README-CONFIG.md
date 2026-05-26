@@ -141,9 +141,9 @@ Supported `<param_name>`: `planting_doy`, `is_irrigated`, `soil_type`, `n_fertil
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `default_value` | Int/Float64 | see below | Default value used when no NC file is provided, or the file/year is not found |
-| `file` | String | — | (Optional) Path to NetCDF file with spatial variation |
-| `variable` | String | — | (Required if `file` is set) Variable name inside the NetCDF file |
+| `default_value` | Int/Float64 | see below | Default value used when no file is provided, or the file/year is not found |
+| `file` | String | — | (Optional) Path to spatial file (NetCDF `.nc` or GeoTIFF `.tif`/`.tiff`) |
+| `variable` | String | — | (Required if `file` is set and is a NetCDF file) Variable name inside the NetCDF file |
 
 **Built-in defaults** (used when `[input.netcdf.<param_name>]` section is not present at all):
 
@@ -155,11 +155,16 @@ Supported `<param_name>`: `planting_doy`, `is_irrigated`, `soil_type`, `n_fertil
 | `n_fertilizer` | 100.0 |
 | `thermal_time_requirement` | 1500.0 |
 
-The NC file can be:
-- **2D** (lon, lat): static parameter, same value for all years
-- **3D** (lon, lat, time or year): time-varying parameter, sliced by year
+The file can be:
+- **NetCDF 2D** (lon, lat): static parameter, same value for all years
+- **NetCDF 3D** (lon, lat, time or year): time-varying parameter, sliced by year
+- **GeoTIFF 2D** (single band): static parameter, same value for all years
 
-The time dimension in management parameter NC files can be named either `time` or `year`. The program will try `time` first, then fall back to `year`.
+When using a GeoTIFF file:
+- Nearest-neighbor resampling is used when TIF and simulation grid resolutions differ
+- A bbox check is performed to ensure the TIF extent covers the simulation grid — if not, a warning is issued and pixels outside the TIF coverage use `default_value`
+
+The time dimension in management parameter NetCDF files can be named either `time` or `year`. The program will try `time` first, then fall back to `year`.
 
 **Year matching logic** (for 3D management parameter files):
 
@@ -168,7 +173,7 @@ The time dimension in management parameter NC files can be named either `time` o
 3. **Single value fallback**: if the file has only one time value, use it regardless of the simulation year (with a console warning)
 4. **default_value**: if none of the above works, fall back to `default_value`
 
-Priority: NC file (with matching logic above) > `default_value` > built-in default.
+Priority: file (NC or TIF, with matching logic above) > `default_value` > built-in default.
 
 Example — uniform value only (no spatial NC file):
 
@@ -186,6 +191,16 @@ file = "data/netcdf/soil_type.nc"
 variable = "soil_type"
 ```
 
+Example — spatial TIF file with fallback:
+
+```toml
+[input.netcdf.soil_type]
+default_value = 9
+file = "data/tif/soil_type.tif"
+```
+
+> For TIF files, the `variable` key is not needed — the program reads the first band directly.
+
 ---
 
 ## `[output]`
@@ -193,4 +208,10 @@ variable = "soil_type"
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `directory` | String | — | Output directory path (relative to config file, or absolute) |
-| `format` | String | — | Output format: `"csv"` or `"netcdf"` |
+| `format` | String | — | Output format: `"csv"` or `"raster"` (or `"geotiff"`) |
+
+When `format = "raster"` (or `"geotiff"`), spatial simulation outputs GeoTIFF files per year:
+- `yield_YYYY.tif` — Crop yield (Float64, kg/ha)
+- `harvest_doy_YYYY.tif` — Harvest day of year (Int32)
+
+Both files use WGS84 (EPSG:4326) CRS with proper geotransform metadata.
