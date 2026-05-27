@@ -201,7 +201,7 @@ The time variable in your NetCDF file must follow one of these formats:
 
 > If the `units` attribute is missing or not in the `"days since YYYY-MM-DD"` format, the program will report an error.
 
-###### 2.1.3 Weather Variable dimension
+##### 2.1.3 Weather Variable dimension
 
 Each meteorological variable is specified in `[spatial_simulation.weather.<name>]` with user-friendly names:
 
