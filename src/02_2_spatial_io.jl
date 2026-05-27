@@ -1,14 +1,15 @@
 # IO_SPATIAL — Spatial I/O for MATCRO simulation (NetCDF + GeoTIFF)
-# Used when config.input_format = "netcdf"
+# Used when config.input_format = "raster"
 # Supports: single-point, spatial parallel, multi-year single file
 # Companion: io.jl (core structs), io_csv.jl (CSV I/O)
 #
-# Each variable's file path is specified individually in config.toml [input.netcdf.<var>]
+# Each variable's file path is specified individually in config.toml [input.raster.weather] or [input.raster.management]
 # No base_dir — paths resolved relative to config file directory by read_config
 
 using NCDatasets
 using Dates
 using ArchGDAL
+using JSON
 import ArchGDAL as AG
 
 # ============================================================
@@ -16,7 +17,7 @@ import ArchGDAL as AG
 # single lat/lon point from NetCDF files, returns Dict{doy => DailyForcing}
 # ============================================================
 function read_forcing_netcdf(config::Config, year::Int)::Dict{Int,DailyForcing}
-    nc = config.netcdf_vars
+    nc = config.raster_vars
     lat = config.latitude
     lon = Float64(get(nc, "longitude", -100.0))
 
@@ -145,7 +146,7 @@ end
 # Uses the first variable's file to get grid info
 # ============================================================
 function get_grid_info(config::Config)
-    nc = config.netcdf_vars
+    nc = config.raster_vars
     # Always read grid from tmx forcing file (all forcing files share the same grid)
     # This ensures consistent lat/lon ordering regardless of management param format
     tmx_meta = get(nc, "tmx", nothing)
@@ -169,7 +170,7 @@ end
 # each field is Matrix{Float64} of size (nlon, nlat)
 # ============================================================
 function read_forcing_netcdf_spatial(config::Config, year::Int)
-    nc = config.netcdf_vars
+    nc = config.raster_vars
 
     tmax_3d = _read_nc_spatial(nc["tmx"], year; config=config)
     tmin_3d = _read_nc_spatial(nc["tmn"], year; config=config)
@@ -241,7 +242,7 @@ end
 # ============================================================
 function load_management_param(config::Config, param_name::String, year::Int,
                                n_lon::Int, n_lat::Int; lats=nothing, lons=nothing)
-    var_meta = get(config.netcdf_vars, param_name, nothing)
+    var_meta = get(config.raster_vars, param_name, nothing)
     default_val = var_meta !== nothing ? Float64(get(var_meta, "default_value", 0)) : 0.0
 
     if var_meta !== nothing && haskey(var_meta, "file")
@@ -258,20 +259,26 @@ function load_management_param(config::Config, param_name::String, year::Int,
                 @warn "TIF management param requires lat/lon info, using default=$default_val"
                 return fill(default_val, n_lon, n_lat)
             end
-            return _load_management_tif(filepath, year, lats, lons, default_val)
+            return _load_management_tif(filepath, lats, lons, default_val)
         end
 
         ds = Dataset(filepath)
         vname = haskey(var_meta, "variable") ? var_meta["variable"] : param_name
 
-        # Check lat ordering in this NC file (before close)
+        # Check lat/lon ordering in this NC file (before close)
         nc_lat_descending = false
+        nc_lat_vals = Float64[]
+        nc_lon_vals = Float64[]
         if haskey(ds, config.lat_dim) || haskey(ds, "lat") || haskey(ds, "latitude")
             nc_lat_var = _find_var(ds, config.lat_dim, ["lat", "latitude", "latitute"])
             nc_lat_vals = Float64.(nc_lat_var[:])
             if length(nc_lat_vals) >= 2
                 nc_lat_descending = nc_lat_vals[1] > nc_lat_vals[2]
             end
+        end
+        if haskey(ds, config.lon_dim) || haskey(ds, "lon") || haskey(ds, "longitude")
+            nc_lon_var = _find_var(ds, config.lon_dim, ["lon", "longitude"])
+            nc_lon_vals = Float64.(nc_lon_var[:])
         end
 
         # Try "time" first, then fallback to "year" (management params often use "year")
@@ -341,6 +348,18 @@ function load_management_param(config::Config, param_name::String, year::Int,
             end
         end
 
+        # Bbox coverage check: warn if management NC does not fully cover weather grid
+        if lats !== nothing && lons !== nothing && length(nc_lat_vals) >= 2
+            nc_lon_min, nc_lon_max = extrema(nc_lon_vals)
+            nc_lat_min, nc_lat_max = nc_lat_descending ? (nc_lat_vals[end], nc_lat_vals[1]) : (nc_lat_vals[1], nc_lat_vals[end])
+            grid_lon_min, grid_lon_max = extrema(lons)
+            grid_lat_min, grid_lat_max = extrema(lats)
+            if nc_lon_min > grid_lon_min || nc_lon_max < grid_lon_max ||
+               nc_lat_min > grid_lat_min || nc_lat_max < grid_lat_max
+                @warn "Management param '$param_name' ($filepath) extent does not fully cover weather grid — uncovered pixels using default values"
+            end
+        end
+
         return data
     else
         return fill(default_val, n_lon, n_lat)
@@ -349,57 +368,13 @@ end
 
 # ============================================================
 # _load_management_tif — load management parameter from GeoTIFF
-# Handles both single-band (2D) and multi-band (3D with year) TIF
+# Only single-band (2D) TIF is supported; the value is used for all years
 # ============================================================
-function _load_management_tif(filepath::String, year::Int,
+function _load_management_tif(filepath::String,
                               target_lats::Vector{Float64}, target_lons::Vector{Float64},
                               default_val::Float64)::Matrix{Float64}
-    n_lon = length(target_lons)
-    n_lat = length(target_lats)
-
     AG.read(filepath) do dataset
-        n_bands = AG.nraster(dataset)
-
-        # Single band: use directly regardless of year
-        if n_bands == 1
-            return _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
-        end
-
-        # Multi-band: try to find year from band names
-        band_years = Int[]
-        for b in 1:n_bands
-            band = AG.getband(dataset, b)
-            desc = AG.getname(band)
-            if occursin(r"\d{4}", desc)
-                push!(band_years, parse(Int, match(r"\d{4}", desc).match))
-            end
-        end
-
-        if isempty(band_years)
-            @warn "No year metadata in TIF bands ($filepath), using band 1"
-            return _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
-        end
-
-        # Exact year match
-        exact = findall(y -> y == year, band_years)
-        if !isempty(exact)
-            return _extract_tif_band(dataset, exact[1], target_lons, target_lats, default_val)
-        elseif length(band_years) == 1
-            @warn "TIF has only one band (year $(band_years[1])), using it for year $year"
-            return _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
-        else
-            # Backward fill
-            earlier = band_years[band_years .< year]
-            if !isempty(earlier)
-                nearest_year = maximum(earlier)
-                band_idx = findall(y -> y == nearest_year, band_years)[1]
-                @warn "Year $year not found in TIF ($filepath), using nearest earlier year $nearest_year (backward fill)"
-                return _extract_tif_band(dataset, band_idx, target_lons, target_lats, default_val)
-            else
-                @warn "No suitable year in TIF ($filepath) for year $year, using default=$default_val"
-                return fill(default_val, n_lon, n_lat)
-            end
-        end
+        _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
     end
 end
 
@@ -537,10 +512,11 @@ function write_yield_slice(output_path::String, year::Int, years::Vector{Int},
 end
 
 # ============================================================
-# write_yield_tif — write a 2D yield GeoTIFF for one year
+# write_float64_tif — write a 2D Float64 GeoTIFF for one year
 # ============================================================
-function write_yield_tif(yield_map::Matrix{Float64}, lats::Vector{Float64},
-                         lons::Vector{Float64}, year::Int, output_path::String)
+function write_float64_tif(data_map::Matrix{Float64}, lats::Vector{Float64},
+                           lons::Vector{Float64}, year::Int, output_path::String;
+                           unit::String="kg/ha")
     n_lon = length(lons)
     n_lat = length(lats)
 
@@ -549,7 +525,7 @@ function write_yield_tif(yield_map::Matrix{Float64}, lats::Vector{Float64},
 
     AG.create(output_path; driver=AG.getdriver("GTiff"), width=n_lon, height=n_lat, nbands=1, dtype=Float64) do dataset
         band = AG.getband(dataset, 1)
-        AG.write!(band, yield_map)
+        AG.write!(band, data_map)
 
         y_origin = lats[1] - pixel_height / 2
         geo_transform = [lons[1] - pixel_width / 2, pixel_width, 0.0,
@@ -557,11 +533,9 @@ function write_yield_tif(yield_map::Matrix{Float64}, lats::Vector{Float64},
         AG.setgeotransform!(dataset, geo_transform)
         AG.setproj!(dataset, "EPSG:4326")
 
-        AG.setunittype!(band, "kg/ha")
+        AG.setunittype!(band, unit)
         AG.setnodatavalue!(band, NaN)
     end
-
-    println("  Yield TIF written: ", output_path)
 end
 
 # ============================================================
@@ -577,7 +551,7 @@ function write_harvest_doy_tif(harvest_map::Matrix{Float64}, lats::Vector{Float6
 
     AG.create(output_path; driver=AG.getdriver("GTiff"), width=n_lon, height=n_lat, nbands=1, dtype=Int32) do dataset
         band = AG.getband(dataset, 1)
-        AG.write!(band, Int32.(round.(harvest_map)))
+        AG.write!(band, Int32.(round.(replace(harvest_map, NaN => -999))))
 
         y_origin = lats[1] - pixel_height / 2
         geo_transform = [lons[1] - pixel_width / 2, pixel_width, 0.0,
@@ -588,6 +562,173 @@ function write_harvest_doy_tif(harvest_map::Matrix{Float64}, lats::Vector{Float6
         AG.setunittype!(band, "day of year")
         AG.setnodatavalue!(band, -999)
     end
+end
 
-    println("  Harvest DOY TIF written: ", output_path)
+# ============================================================
+# load_boundary — load boundary polygon from GeoJSON/Shapefile
+# Returns Vector of polygons, each polygon is Vector of (lon, lat) tuples
+# CRS is automatically converted to WGS84 (EPSG:4326) if needed
+# ============================================================
+# load_boundary — load boundary polygon from GeoJSON file
+# Returns Vector of polygons, each polygon is Vector of (lon, lat) tuples
+# ============================================================
+function load_boundary(filepath::String)::Vector{Vector{Tuple{Float64,Float64}}}
+    polygons = Vector{Vector{Tuple{Float64,Float64}}}()
+
+    # Read and parse GeoJSON manually (more reliable than GDAL for simple GeoJSON)
+    json_str = read(filepath, String)
+    json = JSON.parse(json_str)
+
+    features = get(json, "features", [])
+    for feature in features
+        geom = get(feature, "geometry", nothing)
+        if geom === nothing
+            continue
+        end
+
+        geom_type = get(geom, "type", "")
+        coords = get(geom, "coordinates", [])
+
+        if geom_type == "Polygon"
+            # coords[1] is the outer ring
+            ring = coords[1]
+            polygon = [(c[1], c[2]) for c in ring]
+            push!(polygons, polygon)
+        elseif geom_type == "MultiPolygon"
+            # coords is array of polygons, each polygon is array of rings
+            for poly_coords in coords
+                ring = poly_coords[1]  # outer ring
+                polygon = [(c[1], c[2]) for c in ring]
+                push!(polygons, polygon)
+            end
+        end
+    end
+
+    return polygons
+end
+
+# ============================================================
+# point_in_polygon — ray-casting algorithm to test if a point is inside a polygon
+# ============================================================
+function point_in_polygon(lon::Float64, lat::Float64, polygon::Vector{Tuple{Float64,Float64}})::Bool
+    n = length(polygon)
+    if n < 3
+        return false
+    end
+
+    inside = false
+    j = n
+    for i in 1:n
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+
+        # Check if point is on the edge
+        if ((yi > lat) != (yj > lat)) &&
+           (lon < (xj - xi) * (lat - yi) / (yj - yi) + xi)
+            inside = !inside
+        end
+        j = i
+    end
+
+    return inside
+end
+
+# ============================================================
+# point_near_polygon — check if a point is within buffer distance of polygon
+# Uses simple bounding box + distance to line segments
+# ============================================================
+function point_near_polygon(lon::Float64, lat::Float64,
+                           polygon::Vector{Tuple{Float64,Float64}},
+                           buffer_deg::Float64)::Bool
+    n = length(polygon)
+    if n < 3
+        return false
+    end
+
+    # First check if inside (with original polygon)
+    if point_in_polygon(lon, lat, polygon)
+        return true
+    end
+
+    # Check distance to each edge
+    for i in 1:n
+        j = i % n + 1
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[j]
+
+        dist = _point_to_segment_distance(lon, lat, x1, y1, x2, y2)
+        if dist <= buffer_deg
+            return true
+        end
+    end
+
+    return false
+end
+
+# Helper: perpendicular distance from point to line segment
+function _point_to_segment_distance(px::Float64, py::Float64,
+                                    x1::Float64, y1::Float64,
+                                    x2::Float64, y2::Float64)::Float64
+    dx = x2 - x1
+    dy = y2 - y1
+
+    # If segment is a point
+    if dx == 0 && dy == 0
+        return sqrt((px - x1)^2 + (py - y1)^2)
+    end
+
+    # Project point onto line, clamped to segment
+    t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / (dx^2 + dy^2)))
+
+    proj_x = x1 + t * dx
+    proj_y = y1 + t * dy
+
+    return sqrt((px - proj_x)^2 + (py - proj_y)^2)
+end
+
+# ============================================================
+# create_boundary_mask — create boolean mask for pixels within/contacting boundary
+# Returns n_lon x n_lat matrix: true = pixel is within/contacting boundary
+# ============================================================
+function create_boundary_mask(lons::Vector{Float64}, lats::Vector{Float64},
+                              boundary_file::String; buffer_deg::Float64=0.0)::Matrix{Bool}
+    n_lon = length(lons)
+    n_lat = length(lats)
+
+    # Load boundary polygons
+    polygons = load_boundary(boundary_file)
+
+    if isempty(polygons)
+        @warn "No polygons found in boundary file: $boundary_file"
+        return fill(true, n_lon, n_lat)
+    end
+
+    mask = Matrix{Bool}(undef, n_lon, n_lat)
+
+    for i_lon in 1:n_lon
+        for i_lat in 1:n_lat
+            lon = lons[i_lon]
+            lat = lats[i_lat]
+
+            # Check if point is in or near any polygon
+            in_boundary = false
+            for poly in polygons
+                if buffer_deg > 0
+                    if point_near_polygon(lon, lat, poly, buffer_deg)
+                        in_boundary = true
+                        break
+                    end
+                else
+                    if point_in_polygon(lon, lat, poly)
+                        in_boundary = true
+                        break
+                    end
+                end
+            end
+
+            mask[i_lon, i_lat] = in_boundary
+        end
+    end
+
+    return mask
 end

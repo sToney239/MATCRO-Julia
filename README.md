@@ -38,7 +38,7 @@ Pkg.add("NCDatasets")
 Pkg.add("ArchGDAL")
 ```
 
-> If you only use CSV input mode, `NCDatasets` and `ArchGDAL` are not required.
+> If you only use point (CSV) input mode, `NCDatasets` and `ArchGDAL` are not required.
 
 ## Quick start
 
@@ -49,7 +49,7 @@ julia src/00_matcro.jl <config_path>
 This command consists of three parts separated by spaces: the `julia` interpreter, the main program script `src/00_matcro.jl`, and the path to a `.toml` configuration file.
 
 - `<config_path>` can be any `.toml` file, located anywhere on your system — no need to place it in the project root
-- All relative paths in the `.toml` file (e.g., `param_file`, `file`) are resolved relative to the config file's own directory
+- All relative paths in the `.toml` file (e.g., `crop_param`, `file`) are resolved relative to the config file's own directory
 - The model source code lives in the `src/` directory, with `00_matcro.jl` as the main entry point. The `.toml` file is a configuration file that Julia can read — you are free to modify its contents. For detailed parameter descriptions, see the example configs in `example/` and the [README-CONFIG.md](README-CONFIG.md) reference.
 
 For full configuration `toml` reference, see [README-CONFIG.md](README-CONFIG.md).
@@ -59,35 +59,110 @@ For full configuration `toml` reference, see [README-CONFIG.md](README-CONFIG.md
 The project includes ready-to-run example datasets. Try the following commands:
 
 ```bash
-# Point simulation wit single year CSV data
+# Point simulation with single year CSV data
 julia src/00_matcro.jl example/csv/config.toml
 
-# Point simulation wit multi-year CSV data
+# Point simulation with multi-year CSV data
 julia src/00_matcro.jl example/csv_multi_year/config.toml
 
-# Spatial simulation wit NetCDF weather data and NetCDF management data
+# Spatial simulation with NetCDF weather data and NetCDF management data
 julia src/00_matcro.jl example/netcdf/config.toml
 
-# Spatial simulation wit NetCDF weather data and TIF management data
+# Spatial simulation with NetCDF weather data and TIF management data
+# with boundary filter
 julia src/00_matcro.jl example/tif/config.toml
 ```
 
 ### Multi-threaded parallel simulation
 
-NetCDF spatial mode supports multi-threaded parallel pixel simulation. Set the thread count via `nthreads` in the `[input.netcdf]` section of your config file.
+**Raster spatial mode** supports multi-threaded parallel pixel simulation using Julia's built-in threading. 
+
+> Please note that for point format only supports single thread simulation.
+
+The thread count is controlled by the Julia runtime, **not** by the config file.
+
+**How to enable multi-threading:**
+
+```bash
+# Use 4 threads
+julia -t 4 src/00_matcro.jl example/tif/config.toml
+```
+
+You can also set the `JULIA_NUM_THREADS` environment variable instead of the `-t` flag.
 
 **How many threads should you use?**
-- Check available CPU cores:
+
+- Check available CPU threads:
   - Windows: `echo %NUMBER_OF_PROCESSORS%` or Task Manager → Performance → CPU → Logical processors
   - macOS: `sysctl -n hw.ncpu`
   - Linux: `nproc`
-- **Recommendation**: Set `nthreads` to physical cores minus 1 or 2, leaving headroom for your system and other tasks. For example, on a 16-core machine, use 14 threads.
+- **Recommendation**: Use physical threads minus 1 or 2, leaving for your system and other tasks. For example, on a 16-thread machine, use 14 threads.
+
+## Configuration Structure
+
+The config TOML file has two main sections:
+
+### `[general]`
+
+Core simulation settings that apply to both point and raster modes:
+
+| Parameter | Description |
+|-----------|-------------|
+| `crop_name` | Crop type: `"Maize"`, `"Rice"`, `"Wheat"`, `"Soybeans"` |
+| `crop_param` | Path to crop parameter TOML file |
+| `start_year` / `end_year` | Simulation period |
+| `start_doy` / `end_doy` | Day-of-year range |
+| `time_step` | Time step in seconds (typically 3600) |
+| `co2_ppm_default` | Fallback CO₂ concentration [ppm] |
+| `co2_yearly_file` | Path to yearly CO₂ CSV file (optional) |
+
+### Input: choose `[point_simulation]` **or** `[spatial_simulation]`
+
+#### Point mode — `[point_simulation]`
+
+```toml
+[point_simulation]
+latitude = 40.0
+output_directory = "output/"
+
+[point_simulation.weather]
+csv_path = "weather_data.csv"
+
+[point_simulation.management]
+planting_doy = 120
+is_irrigated = 0
+soil_type = 9
+n_fertilizer = 100.0
+thermal_time_requirement = 1500.0
+```
+
+#### Spatial mode — `[spatial_simulation]`
+
+```toml
+[spatial_simulation]
+output_directory = "output/"
+
+[spatial_simulation.weather]
+lon_dim = "lon"
+lat_dim = "lat"
+time_dim = "time"
+
+[spatial_simulation.weather.temperature_max]
+file = "data/netcdf/tmx.nc4"
+variable = "tmx"
+# ... other weather variables ...
+
+[spatial_simulation.management]
+[spatial_simulation.management.planting_doy]
+default_value = 120
+# ... other management params (with optional spatial files) ...
+```
 
 ## Input Data Format
 
-### CSV Input Data Format
+### 1. Point Data Format (CSV)
 
-When using CSV input (`[input.csv]` in config.toml), your data file must have the following columns:
+When running point simulation, the weather data should be CSV format (specified by `csv_path` in `[point_simulation.weather]`). Your CSV file must have the following columns:
 
 | Column | Unit | Description |
 |--------|------|-------------|
@@ -104,15 +179,20 @@ When using CSV input (`[input.csv]` in config.toml), your data file must have th
 
 The file must include a header row with these column names.
 
-### NetCDF / Raster Input Data Format
+Management parameters are specified in `[point_simulation.management]`.
 
-When using NetCDF input (`[input.netcdf]` in config.toml), your data files must follow these format requirements:
+### 2. Raster Input Data Format (NetCDF & TIFF)
 
-#### Spatial dimensions
+When using NetCDF or TIFF input (`[spatial_simulation]` in config.toml), your data files must follow these format requirements.
 
-Dimension names are configurable via `lon_dim`, `lat_dim`, `time_dim` in `[input.netcdf]` (defaults: `lon`, `lat`, `time`). Common alternatives like `latitude`, `longitude` are also auto-detected as fallbacks.
 
-#### Time dimension
+#### 2.1 Weather variables (NetCDF format required)
+
+##### 2.1.1 Spatial dimensions
+
+Dimension names are configurable via `lon_dim`, `lat_dim`, `time_dim` in `[spatial_simulation.weather]` (defaults: `lon`, `lat`, `time`). Common alternatives like `latitude`, `longitude` are also auto-detected as fallbacks.
+
+##### 2.1.2 Time dimension
 
 The time variable in your NetCDF file must follow one of these formats:
 
@@ -121,33 +201,71 @@ The time variable in your NetCDF file must follow one of these formats:
 
 > If the `units` attribute is missing or not in the `"days since YYYY-MM-DD"` format, the program will report an error.
 
-#### Variable structure
+###### 2.1.3 Weather Variable dimension
 
-Each meteorological variable (tmx, tmn, prc, rsd, shm, wnd, prs) is specified individually in `[input.netcdf.<var>]` with:
+Each meteorological variable is specified in `[spatial_simulation.weather.<name>]` with user-friendly names:
 
+| Config key | Variable | Description |
+|------------|----------|-------------|
+| `temperature_max` | tmx | Daily maximum temperature |
+| `temperature_min` | tmn | Daily minimum temperature |
+| `precipitation` | prc | Precipitation rate |
+| `radiation` | rsd | Downward shortwave radiation |
+| `humidity` | shm | Specific humidity |
+| `wind_speed` | wnd | Wind speed |
+| `pressure` | prs | Surface air pressure |
+
+Each weather variable section requires:
 - `file`: path to the NetCDF file (relative to config file location, or absolute)
-- `variable`: variable name inside the file 
-  - you should check the dimension name of the NetCDF file.
-  - It may differ from the file name, e.g., key `tmx` → variable `tasmax`.
+- `variable`: variable name inside the file
 
+Optional keys:
+- `height`: wind measurement height (default: 10.0 m), only for `wind_speed`
+- `scale_factor`: scaling factor for data values
+- `add_offset`: offset added to data values
 
-#### Management parameters
+#### 2.2 Management parameters (NetCDF or TIF format)
 
-Management parameters are specified in `[input.netcdf.<param_name>]` sections with a `default_value` key. Optionally, you can also provide a spatial NC file or a GeoTIFF file.
+> Belows describes only the TIF format requirement, if you choose NetCDF file, the format should be like in 2.2
 
-1. **Uniform default only**: set `default_value` — used for all pixels when no file is provided, or the file/year is not found.
+Management parameters are specified in `[spatial_simulation.management.<param_name>]` sections:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `planting_doy` | Planting day of year | 120 |
+| `is_irrigated` | 0 = rainfed, 1 = irrigated | 0 |
+| `soil_type` | Soil texture index (1-13) | 9 |
+| `n_fertilizer` | Nitrogen fertilizer [kg N/ha] | 100.0 |
+| `thermal_time_requirement` | GDH at maturity | 1500.0 |
+
+Each parameter section supports:
+1. **Uniform default only**: set `default_value` — used for all pixels when no file is provided.
 2. **Spatial NC file**: add `file` and `variable` keys alongside `default_value`. The file can be 2D (lon, lat) for static parameters, or 3D (lon, lat, time) with a year dimension for time-varying parameters.
-3. **Spatial TIF file**: add `file` key with a `.tif`/`.tiff` path alongside `default_value`. The TIF file can be single-band (static) or multi-band (each band = one year). Nearest-neighbor resampling is used when TIF and NC grid resolutions differ. A bbox check is performed to ensure the TIF extent covers the simulation grid.
+3. **Spatial TIF file**: add `file` key with a `.tif`/`.tiff` path alongside `default_value`. The TIF file should be single-band (static, used for all years). Nearest-neighbor resampling is used when TIF and NC grid resolutions differ. A bbox check is performed to ensure the TIF extent covers the simulation grid.
 
 Priority: file (NC or TIF) > `default_value` > built-in default.
+
+#### 2.3 Boundary filtering (optional)
+
+Specify a GeoJSON boundary file to filter pixels:
+
+```toml
+[spatial_simulation.boundary]
+file = "data/boundaries/region.geojson"
+buffer_deg = 0.01    # buffer distance (degrees) for boundary contact detection
+```
+
+>Later `shp` and `TIF` mask will be supported.
 
 For full details, see [README-CONFIG.md](README-CONFIG.md).
 
 ### Spatial Output Format
 
-When running NetCDF spatial simulation with `format = "raster"` (or `"geotiff"`), the model outputs **one GeoTIFF file per year** instead of a single 3D NetCDF file. Two files are generated for each simulation year:
+When running raster spatial simulation with `format = "raster"` (or `"geotiff"`), the model outputs **one GeoTIFF file per year**. Four files are generated for each simulation year:
 
 - `yield_YYYY.tif`: Crop yield (kg/ha), Float64
 - `harvest_doy_YYYY.tif`: Harvest day of year, Int32
+- `LAI_max_YYYY.tif`: Seasonal maximum leaf area index (m²/m²), Float64
+- `biomass_aboveground_YYYY.tif`: Aboveground biomass at harvest (kg/ha), Float64
 
 The TIF files use WGS84 (EPSG:4326) coordinate reference system, with geotransform metadata for proper geospatial alignment.

@@ -33,20 +33,21 @@ using TOML
     co2_file::String           # path to CO2 file (empty → use fixed_ppm)
     co2_fixed_ppm::Float64     # fallback CO2 [ppm]
 
-    # Input
-    input_format::String       # "csv" or "netcdf" (auto-detected)
-    csv_path::String           # CSV forcing file path (if format=csv)
+    # Input / Output (auto-inferred from config)
+    input_format::String       # "point" or "raster" (auto-detected)
+    csv_path::String           # CSV forcing file path (if format=point)
 
-    # NetCDF input metadata (populated if format=netcdf)
-    netcdf_vars::Dict{String,Dict{String,Any}}  # variable → metadata dict
-    nthreads::Int              # parallel threads for spatial NetCDF
+    # Raster input metadata (populated if format=raster)
+    raster_vars::Dict{String,Dict{String,Any}}  # variable → metadata dict
     lon_dim::String            # longitude dimension name in NetCDF
     lat_dim::String            # latitude dimension name in NetCDF
     time_dim::String           # time dimension name in NetCDF
+    boundary_file::String      # boundary file path (GeoJSON/Shapefile), empty = no filtering
+    boundary_buffer::Float64   # buffer distance (degrees) for boundary contact detection
 
     # Output
     output_dir::String
-    output_format::String      # "csv" or "netcdf"
+    output_format::String      # "csv" or "raster" (auto-inferred)
 end
 
 # ============================================================
@@ -192,63 +193,132 @@ function read_config(config_path::String)::Config
     # Get config directory for relative path resolution
     config_dir = dirname(config_path)
 
-    t = toml["time"]
-    loc = toml["location"]
-    crp = toml["crop"]
-    sl = toml["soil"]
-    co2 = toml["co2"]
-    inp = toml["input"]
-    out = toml["output"]
+    # [general] section
+    gen = toml["general"]
 
-    # Auto-detect input format: [input.csv] or [input.netcdf]
-    nc_vars = Dict{String,Dict{String,Any}}()
-    nthreads = 1
+    # Weather variable name mapping: user-friendly → internal
+    weather_name_map = Dict(
+        "temperature_max" => "tmx",
+        "temperature_min" => "tmn",
+        "precipitation"   => "prc",
+        "radiation"       => "rsd",
+        "humidity"        => "shm",
+        "wind_speed"      => "wnd",
+        "pressure"        => "prs",
+    )
+
+    # Defaults
+    input_format = ""
+    output_format = ""
+    csv_path = ""
+    latitude = 0.0
+    raster_vars = Dict{String,Dict{String,Any}}()
     lon_dim = "lon"
     lat_dim = "lat"
     time_dim = "time"
+    boundary_file = ""
+    boundary_buffer = 0.0
+    output_dir = ""
 
-    if haskey(inp, "csv") && haskey(inp["csv"], "path")
-        input_format = "csv"
-        csv_path = isabspath(inp["csv"]["path"]) ? inp["csv"]["path"] : joinpath(config_dir, inp["csv"]["path"])
-    elseif haskey(inp, "netcdf")
-        input_format = "netcdf"
-        csv_path = ""
+    # Management params (defaults)
+    planting_doy = 120
+    is_irrigated = 0
+    soil_type = 9
+    n_fertilizer = 100.0
+    thermal_time_requirement = 1500.0
 
-        # NetCDF settings
-        nc_cfg = inp["netcdf"]
-        nthreads = get(nc_cfg, "nthreads", 1)
-        lon_dim = get(nc_cfg, "lon_dim", "lon")
-        lat_dim = get(nc_cfg, "lat_dim", "lat")
-        time_dim = get(nc_cfg, "time_dim", "time")
+    # --- Point mode: [point_simulation] (priority if both exist) ---
+    if haskey(toml, "point_simulation")
+        input_format = "point"
+        output_format = "csv"
+        point_cfg = toml["point_simulation"]
 
-        # Per-variable metadata (each var has its own section)
-        for (varname, meta) in nc_cfg
-            if isa(meta, Dict)
-                # Resolve file path relative to config_dir
-                if haskey(meta, "file")
-                    # Has a file - could be NetCDF (file + variable) or TIF (file only)
-                    file_path = isabspath(meta["file"]) ? meta["file"] : joinpath(config_dir, meta["file"])
-                    nc_vars[varname] = Dict{String,Any}(
-                        "file" => file_path,
-                        "default_value" => get(meta, "default_value", nothing),
-                    )
-                    # If also has "variable", it's a NetCDF file
-                    if haskey(meta, "variable")
-                        nc_vars[varname]["variable"] = meta["variable"]
-                        nc_vars[varname]["height"] = get(meta, "height", 10.0)
-                        nc_vars[varname]["scale_factor"] = get(meta, "scale_factor", 1.0)
-                        nc_vars[varname]["add_offset"] = get(meta, "add_offset", 0.0)
+        latitude = get(point_cfg, "latitude", 40.0)
+
+        # Output directory
+        output_dir_val = get(point_cfg, "output_directory", "output/")
+        output_dir = isabspath(output_dir_val) ? output_dir_val : joinpath(config_dir, output_dir_val)
+
+        # Weather (CSV)
+        if haskey(point_cfg, "weather")
+            weather_cfg = point_cfg["weather"]
+            csv_path_val = get(weather_cfg, "csv_path", "")
+            csv_path = isabspath(csv_path_val) ? csv_path_val : joinpath(config_dir, csv_path_val)
+        end
+
+        # Management params
+        if haskey(point_cfg, "management")
+            mgmt_cfg = point_cfg["management"]
+            planting_doy = get(mgmt_cfg, "planting_doy", 120)
+            is_irrigated = get(mgmt_cfg, "is_irrigated", 0)
+            soil_type = get(mgmt_cfg, "soil_type", 9)
+            n_fertilizer = get(mgmt_cfg, "n_fertilizer", 100.0)
+            thermal_time_requirement = get(mgmt_cfg, "thermal_time_requirement", 1500.0)
+        end
+
+    # --- Raster mode: [spatial_simulation] ---
+    elseif haskey(toml, "spatial_simulation")
+        input_format = "raster"
+        output_format = "raster"
+
+        raster_cfg = toml["spatial_simulation"]
+
+        # Output directory
+        output_dir_val = get(raster_cfg, "output_directory", "output/")
+        output_dir = isabspath(output_dir_val) ? output_dir_val : joinpath(config_dir, output_dir_val)
+
+        # --- Weather variables ([spatial_simulation.weather]) ---
+        if haskey(raster_cfg, "weather")
+            weather_cfg = raster_cfg["weather"]
+            lon_dim = get(weather_cfg, "lon_dim", "lon")
+            lat_dim = get(weather_cfg, "lat_dim", "lat")
+            time_dim = get(weather_cfg, "time_dim", "time")
+
+            for (varname, meta) in weather_cfg
+                if isa(meta, Dict)
+                    internal_name = get(weather_name_map, varname, varname)
+                    if haskey(meta, "file")
+                        file_path = isabspath(meta["file"]) ? meta["file"] : joinpath(config_dir, meta["file"])
+                        raster_vars[internal_name] = Dict{String,Any}(
+                            "file" => file_path,
+                        )
+                        if haskey(meta, "variable")
+                            raster_vars[internal_name]["variable"] = meta["variable"]
+                            raster_vars[internal_name]["height"] = get(meta, "height", 10.0)
+                            raster_vars[internal_name]["scale_factor"] = get(meta, "scale_factor", 1.0)
+                            raster_vars[internal_name]["add_offset"] = get(meta, "add_offset", 0.0)
+                        end
                     end
-                elseif haskey(meta, "default_value")
-                    # Management param with default_value only (no file)
-                    nc_vars[varname] = Dict{String,Any}(
-                        "default_value" => meta["default_value"],
-                    )
                 end
             end
         end
 
-        # Ensure all 5 management params have entries in nc_vars
+        # --- Management parameters ([spatial_simulation.management]) ---
+        if haskey(raster_cfg, "management")
+            mgmt_cfg = raster_cfg["management"]
+            for (varname, meta) in mgmt_cfg
+                if isa(meta, Dict)
+                    if haskey(meta, "file")
+                        file_path = isabspath(meta["file"]) ? meta["file"] : joinpath(config_dir, meta["file"])
+                        raster_vars[varname] = Dict{String,Any}(
+                            "file" => file_path,
+                            "default_value" => get(meta, "default_value", nothing),
+                        )
+                        if haskey(meta, "variable")
+                            raster_vars[varname]["variable"] = meta["variable"]
+                            raster_vars[varname]["scale_factor"] = get(meta, "scale_factor", 1.0)
+                            raster_vars[varname]["add_offset"] = get(meta, "add_offset", 0.0)
+                        end
+                    elseif haskey(meta, "default_value")
+                        raster_vars[varname] = Dict{String,Any}(
+                            "default_value" => meta["default_value"],
+                        )
+                    end
+                end
+            end
+        end
+
+        # Ensure all 5 management params have entries in raster_vars
         mgmt_defaults = Dict{String,Any}(
             "planting_doy" => 120,
             "is_irrigated" => 0,
@@ -257,49 +327,60 @@ function read_config(config_path::String)::Config
             "thermal_time_requirement" => 1500.0,
         )
         for (pname, pdefault) in mgmt_defaults
-            if !haskey(nc_vars, pname)
-                nc_vars[pname] = Dict{String,Any}("default_value" => pdefault)
-            elseif nc_vars[pname]["default_value"] === nothing
-                nc_vars[pname]["default_value"] = pdefault
+            if !haskey(raster_vars, pname)
+                raster_vars[pname] = Dict{String,Any}("default_value" => pdefault)
+            elseif raster_vars[pname]["default_value"] === nothing
+                raster_vars[pname]["default_value"] = pdefault
             end
         end
+
+        # --- Boundary ([spatial_simulation.boundary]) ---
+        if haskey(raster_cfg, "boundary") && isa(raster_cfg["boundary"], Dict)
+            boundary_cfg = raster_cfg["boundary"]
+            if haskey(boundary_cfg, "file")
+                boundary_file = isabspath(boundary_cfg["file"]) ? boundary_cfg["file"] : joinpath(config_dir, boundary_cfg["file"])
+            end
+            boundary_buffer = get(boundary_cfg, "buffer_deg", 0.0)
+        end
     else
-        error("Must specify either [input.csv] with path or [input.netcdf] with base_dir")
+        error("Must specify either [point_simulation] or [spatial_simulation]")
     end
 
-    # Resolve relative paths relative to config directory
-    crop_param_file = isabspath(crp["param_file"]) ? crp["param_file"] : joinpath(config_dir, crp["param_file"])
-    co2_file_val = get(co2, "file", "")
+    # Resolve relative paths
+    crop_param_file_val = get(gen, "crop_param", "params/maize.toml")
+    crop_param_file = isabspath(crop_param_file_val) ? crop_param_file_val : joinpath(config_dir, crop_param_file_val)
+
+    co2_file_val = get(gen, "co2_yearly_file", "")
     if co2_file_val != "" && !isabspath(co2_file_val)
         co2_file_val = joinpath(config_dir, co2_file_val)
     end
-    output_dir = isabspath(out["directory"]) ? out["directory"] : joinpath(config_dir, out["directory"])
 
     return Config(;
-        start_year        = t["start_year"],
-        end_year          = t["end_year"],
-        start_doy         = t["start_doy"],
-        end_doy           = t["end_doy"],
-        time_step         = t["time_step"],
-        latitude          = loc["latitude"],
-        crop_name         = crp["crop_name"],
+        start_year        = gen["start_year"],
+        end_year          = gen["end_year"],
+        start_doy         = get(gen, "start_doy", 1),
+        end_doy           = get(gen, "end_doy", 365),
+        time_step         = get(gen, "time_step", 3600),
+        latitude          = latitude,
+        crop_name         = gen["crop_name"],
         crop_param_file   = crop_param_file,
-        planting_doy      = crp["planting_doy"],
-        is_irrigated      = crp["is_irrigated"],
-        soil_type         = sl["soil_type"],
-        n_fertilizer      = sl["n_fertilizer"],
-        thermal_time_requirement = sl["thermal_time_requirement"],
+        planting_doy      = planting_doy,
+        is_irrigated      = is_irrigated,
+        soil_type         = soil_type,
+        n_fertilizer      = n_fertilizer,
+        thermal_time_requirement = thermal_time_requirement,
         co2_file          = co2_file_val,
-        co2_fixed_ppm     = get(co2, "fixed_ppm", 400.0),
+        co2_fixed_ppm     = get(gen, "co2_ppm_default", 400.0),
         input_format      = input_format,
         csv_path          = csv_path,
-        netcdf_vars       = nc_vars,
-        nthreads          = nthreads,
+        raster_vars       = raster_vars,
         lon_dim           = lon_dim,
         lat_dim           = lat_dim,
         time_dim          = time_dim,
+        boundary_file     = boundary_file,
+        boundary_buffer   = boundary_buffer,
         output_dir        = output_dir,
-        output_format     = out["format"],
+        output_format     = output_format,
     )
 end
 

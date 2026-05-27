@@ -32,6 +32,8 @@ const fraction_starch_convert = 1.11
 
     LAI::Float64 = 0.0
     LAI_max::Float64 = 0.0
+    LAI_max_season::Float64 = 0.0
+    shoot_biomass_at_harvest::Float64 = 0.0
     crop_height::Float64 = 0.0
     root_length::Float64 = 0.0
 
@@ -95,6 +97,9 @@ function judge_planting!(crop::CropState, doy::Int, hour::Float64,
         crop.n_heat_events = 0.0
 
         crop.LAI = 0.0
+
+        crop.LAI_max_season = 0.0
+        crop.shoot_biomass_at_harvest = 0.0
     end
 end
 
@@ -450,6 +455,10 @@ function judge_harvest!(crop::CropState, doy::Int, thermal_time_requirement::Flo
 
         # Eq.141: Yield
         crop.yield = crop.storage_organ_biomass * harvest_index_final
+
+        # Save season peak values before reset
+        crop.LAI_max_season = crop.LAI_max
+        crop.shoot_biomass_at_harvest = crop.shoot_biomass
 
         # Full reset after harvest (matching Fortran JUDHVT subroutine)
         crop.development_stage = 0.0

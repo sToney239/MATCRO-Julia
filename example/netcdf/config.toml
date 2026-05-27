@@ -1,93 +1,77 @@
 # Example: NetCDF spatial simulation (3-year, with management params)
 # Usage: julia src/00_matcro.jl example/netcdf/config.toml
 
-[time]
+[general]
+crop_name = "Maize"
+crop_param = "params/maize.toml"
 start_year = 2021
 end_year = 2023
 start_doy = 1
 end_doy = 365
 time_step = 3600
+co2_ppm_default = 415.0
+co2_yearly_file = "data/co2.csv"
 
-[location]
-latitude = 40.0
+[spatial_simulation]
+output_directory = "output/"
 
-[crop]
-crop_name = "Maize"
-param_file = "params/maize.toml"
-planting_doy = 120
-is_irrigated = 0
-
-[soil]
-soil_type = 9
-n_fertilizer = 100.0
-thermal_time_requirement = 1500.0
-
-[co2]
-fixed_ppm = 415.0
-file = "data/co2.csv"
-
-[input.netcdf]
-nthreads = 4
+[spatial_simulation.weather]
 lon_dim = "lon"
 lat_dim = "lat"
 time_dim = "time"
 
-# Meteorological forcing (multi-year files, 2021-2023)
-[input.netcdf.tmx]
+[spatial_simulation.weather.temperature_max]
 file = "data/netcdf/tmx.nc4"
 variable = "tmx"
 
-[input.netcdf.tmn]
+[spatial_simulation.weather.temperature_min]
 file = "data/netcdf/tmn.nc4"
 variable = "tmn"
 
-[input.netcdf.prc]
+[spatial_simulation.weather.precipitation]
 file = "data/netcdf/prc.nc4"
 variable = "prc"
 
-[input.netcdf.rsd]
+[spatial_simulation.weather.radiation]
 file = "data/netcdf/rsd.nc4"
 variable = "rsd"
 
-[input.netcdf.shm]
+[spatial_simulation.weather.humidity]
 file = "data/netcdf/shm.nc4"
 variable = "shm"
 
-[input.netcdf.wnd]
+[spatial_simulation.weather.wind_speed]
 file = "data/netcdf/wnd.nc4"
 variable = "wnd"
 height = 10.0
 
-[input.netcdf.prs]
+[spatial_simulation.weather.pressure]
 file = "data/netcdf/prs.nc4"
 variable = "prs"
 
 # Management parameters (spatial NC files + default_value fallback)
-[input.netcdf.planting_doy]
+[spatial_simulation.management]
+[spatial_simulation.management.planting_doy]
 default_value = 120
 file = "data/netcdf/planting_doy.nc"
 variable = "planting_doy"
 
-[input.netcdf.is_irrigated]
+[spatial_simulation.management.is_irrigated]
 default_value = 0
 file = "data/netcdf/is_irrigated.nc"
 variable = "is_irrigated"
 
-[input.netcdf.soil_type]
+[spatial_simulation.management.soil_type]
 default_value = 9
 file = "data/netcdf/soil_type.nc"
 variable = "soil_type"
 
-[input.netcdf.n_fertilizer]
+[spatial_simulation.management.n_fertilizer]
 default_value = 100.0
 file = "data/netcdf/n_fertilizer.nc"
 variable = "n_fertilizer"
 
-[input.netcdf.thermal_time_requirement]
+[spatial_simulation.management.thermal_time_requirement]
 default_value = 1500.0
 file = "data/netcdf/thermal_time_requirement.nc"
 variable = "thermal_time_requirement"
-
-[output]
-directory = "output/"
-format = "raster"

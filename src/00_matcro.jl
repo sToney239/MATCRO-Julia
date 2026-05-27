@@ -33,30 +33,26 @@ function run_simulation(config_path::String)
     config = read_config(config_path)
     println("  Config:")
     println("    Crop: ", config.crop_name)
-    println("    Location: lat=$(config.latitude)")
     println("    Period: $(config.start_year)-$(config.end_year)")
     println("    Input format: ", config.input_format)
-    if config.input_format == "netcdf"
-        println("    Threads: ", config.nthreads)
-    end
 
     # 2. Read crop parameters
     params = read_crop_params(config.crop_param_file)
     println("    Parameters loaded from: ", config.crop_param_file)
 
     # 3. Load forcing data
-    if config.input_format == "csv"
+    if config.input_format == "point"
         println("  Loading CSV forcing: ", config.csv_path)
         forcing_data = read_forcing_csv(config.csv_path)
-    elseif config.input_format == "netcdf"
+    elseif config.input_format == "raster"
         println("  Will load NetCDF forcing per year")
         forcing_data = nothing
     else
         error("Unknown input format: $(config.input_format)")
     end
 
-    # 3b. Spatial parallel mode (NetCDF + nthreads > 1)
-    if config.input_format == "netcdf"
+    # 3b. Spatial parallel mode (NetCDF)
+    if config.input_format == "raster"
         return run_spatial_simulation(config)
     end
 
@@ -85,9 +81,9 @@ function run_simulation(config_path::String)
         co2_ppm = read_co2(config, year)
 
         # Load this year's forcing
-        if config.input_format == "csv"
+        if config.input_format == "point"
             year_forcing = forcing_data
-        elseif config.input_format == "netcdf"
+        elseif config.input_format == "raster"
             year_forcing = Dict{Int,Dict{Int,DailyForcing}}()
             year_forcing[year] = read_forcing_netcdf(config, year)
         else
@@ -156,7 +152,7 @@ function run_simulation(config_path::String)
                     humidity=f_today.humidity, wind=f_today.wind,
                     pressure=f_today.pressure, ozone=f_today.ozone,
                     int_sinb=int_sinb,
-                    wind_height=get(config.netcdf_vars, "wnd", Dict("height"=>10.0))["height"]
+                    wind_height=get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]
                 )
 
                 tmp_K = hourly.temperature  # already in K from tinterp
@@ -345,25 +341,24 @@ function run_simulation(config_path::String)
         push!(yearly_results, (
             year=year,
             yield=crop.yield,
-            LAI_max=crop.LAI_max,
+            LAI_max=crop.LAI_max_season,
+            biomass_aboveground=crop.shoot_biomass_at_harvest,
             harvest_doy=crop.harvest_doy,
         ))
 
-        println("    Yield: $(round(crop.yield, digits=2)) kg/ha, Harvest DOY: $(crop.harvest_doy)")
+        @printf("    Yield: %.2f kg/ha, Harvest DOY: %d, LAI_max: %.2f, Biomass_aboveground: %.2f kg/ha\n",
+                crop.yield, crop.harvest_doy, crop.LAI_max_season, crop.shoot_biomass_at_harvest)
 
     end # Year loop
 
     # 9. Write output
     mkpath(config.output_dir)
-    if config.output_format == "csv"
-        write_output_csv(yearly_results, joinpath(config.output_dir, "yield_summary.csv"))
-        write_daily_csv(daily_records, joinpath(config.output_dir, "daily_output.csv"))
-    elseif config.output_format == "netcdf"
-        write_output_netcdf(daily_records, joinpath(config.output_dir, "output.nc"))
-    end
+    write_output_csv(yearly_results, joinpath(config.output_dir, "yield_summary.csv"))
+    write_daily_csv(daily_records, joinpath(config.output_dir, "daily_output.csv"))
 
     println("\n" * "=" ^ 60)
     println("  Simulation Complete")
+    println("  Output saved to: ", abspath(config.output_dir))
     println("=" ^ 60)
     return yearly_results, daily_records
 end
@@ -374,7 +369,8 @@ end
 # ============================================================
 
 function run_spatial_simulation(config::Config)
-    println("\n  Spatial parallel mode: $(config.nthreads) threads")
+    n_actual_threads = Threads.nthreads()
+    println("\n  Spatial parallel mode: $n_actual_threads thread(s)")
 
     # 1. Read crop parameters
     params = read_crop_params(config.crop_param_file)
@@ -386,10 +382,25 @@ function run_spatial_simulation(config::Config)
     n_pixels = n_lon * n_lat
     println("  Grid: $n_lon x $n_lat = $n_pixels pixels")
 
-    # 3. Year loop
+    # 3. Create boundary mask (if boundary file is specified)
+    boundary_mask = nothing
+    if !isempty(config.boundary_file)
+        if isfile(config.boundary_file)
+            println("  Loading boundary: ", config.boundary_file)
+            boundary_mask = create_boundary_mask(lons, lats, config.boundary_file; buffer_deg=config.boundary_buffer)
+            n_in_boundary = sum(boundary_mask)
+            println("  Boundary mask: $n_in_boundary / $n_pixels pixels within boundary")
+        else
+            println("  [WARN] Boundary file not found: $(config.boundary_file), running all pixels")
+        end
+    end
+
+    # 4. Year loop
     years = collect(config.start_year:config.end_year)
     yield_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
     harvest_doy_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
+    LAI_max_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
+    biomass_aboveground_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
 
     for (i_year, year) in enumerate(years)
         println("\n  Year $year ...")
@@ -412,6 +423,11 @@ function run_spatial_simulation(config::Config)
 
         Threads.@threads for index in eachindex(indices)
             i_lon, i_lat = indices[index]
+            # Skip pixels outside boundary
+            if boundary_mask !== nothing && !boundary_mask[i_lon, i_lat]
+                results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                continue
+            end
             lat = lats[i_lat]
             lon = lons[i_lon]
             try
@@ -423,50 +439,46 @@ function run_spatial_simulation(config::Config)
                     Float64(thermal_time_requirement[i_lon, i_lat]);
                     i_lon=i_lon, i_lat=i_lat)
             catch
-                results[index] = (yield=NaN, harvest_doy=NaN)
+                results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
             end
         end
 
         for (index, (i_lon, i_lat)) in enumerate(indices)
             yield_3d[i_lon, i_lat, i_year] = results[index].yield
             harvest_doy_3d[i_lon, i_lat, i_year] = results[index].harvest_doy
+            LAI_max_3d[i_lon, i_lat, i_year] = results[index].LAI_max
+            biomass_aboveground_3d[i_lon, i_lat, i_year] = results[index].biomass_aboveground
         end
 
-        valid = filter(!isnan, yield_3d[:, :, i_year])
-        if !isempty(valid)
-            @printf("    Yield: min=%.2f, mean=%.2f, max=%.2f kg/ha\n",
-                    minimum(valid), sum(valid)/length(valid), maximum(valid))
+        valid_mask = .!isnan.(yield_3d[:, :, i_year])
+        if any(valid_mask)
+            v_yield = yield_3d[:, :, i_year][valid_mask]
+            v_harvest = harvest_doy_3d[:, :, i_year][valid_mask]
+            v_lai = LAI_max_3d[:, :, i_year][valid_mask]
+            v_biomass = biomass_aboveground_3d[:, :, i_year][valid_mask]
+            @printf("    Mean: Yield=%.2f kg/ha, Harvest DOY=%.1f, LAI_max=%.2f, Biomass_aboveground=%.2f kg/ha\n",
+                    sum(v_yield)/length(v_yield), sum(v_harvest)/length(v_harvest),
+                    sum(v_lai)/length(v_lai), sum(v_biomass)/length(v_biomass))
         end
     end
 
     # 5. Write output
     mkpath(config.output_dir)
-    if config.output_format == "csv"
-        # Write per-year CSV
-        for (i_year, year) in enumerate(years)
-            csv_path = joinpath(config.output_dir, "yield_$(year).csv")
-            open(csv_path, "w") do f
-                println(f, "lon,lat,yield,harvest_doy")
-                for i_lon in 1:n_lon, i_lat in 1:n_lat
-                    @printf(f, "%.2f,%.2f,%.2f,%d\n", lons[i_lon], lats[i_lat], yield_3d[i_lon, i_lat, i_year], Int(harvest_doy_3d[i_lon, i_lat, i_year]))
-                end
-            end
-        end
-    elseif config.output_format == "raster" || config.output_format == "geotiff" || config.output_format == "netcdf"
-        # Write per-year TIF (yield + harvest_doy)
-        for (i_year, year) in enumerate(years)
-            yield_path = joinpath(config.output_dir, "yield_$(year).tif")
-            harvest_path = joinpath(config.output_dir, "harvest_doy_$(year).tif")
-            write_yield_tif(yield_3d[:, :, i_year], lats, lons, year, yield_path)
-            write_harvest_doy_tif(harvest_doy_3d[:, :, i_year], lats, lons, year, harvest_path)
-        end
-        # ALSO write NetCDF for comparison
-        nc_path = joinpath(config.output_dir, "yield_spatial.nc")
-        write_output_netcdf_spatial(yield_3d, lats, lons, years, nc_path)
+    # Write per-year TIF
+    for (i_year, year) in enumerate(years)
+        yield_path = joinpath(config.output_dir, "yield_$(year).tif")
+        harvest_path = joinpath(config.output_dir, "harvest_doy_$(year).tif")
+        LAI_max_path = joinpath(config.output_dir, "LAI_max_$(year).tif")
+        biomass_path = joinpath(config.output_dir, "biomass_aboveground_$(year).tif")
+        write_float64_tif(yield_3d[:, :, i_year], lats, lons, year, yield_path; unit="kg/ha")
+        write_harvest_doy_tif(harvest_doy_3d[:, :, i_year], lats, lons, year, harvest_path)
+        write_float64_tif(LAI_max_3d[:, :, i_year], lats, lons, year, LAI_max_path; unit="m2/m2")
+        write_float64_tif(biomass_aboveground_3d[:, :, i_year], lats, lons, year, biomass_path; unit="kg/ha")
     end
 
     println("\n" * "=" ^ 60)
     println("  Spatial Simulation Complete")
+    println("  Output saved to: ", abspath(config.output_dir))
     println("=" ^ 60)
     return yield_3d
 end
@@ -623,7 +635,8 @@ function run_pixel_spatial(config::Config, params::CropParameters,
         end
     end
 
-    return (yield=crop.yield, harvest_doy=crop.harvest_doy)
+    return (yield=crop.yield, harvest_doy=crop.harvest_doy,
+            LAI_max=crop.LAI_max_season, biomass_aboveground=crop.shoot_biomass_at_harvest)
 end
 
 # Command-line entry point (skip when included from other scripts)

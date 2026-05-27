@@ -6,55 +6,21 @@ For a quick start guide, see [README.md](README.md).
 
 ---
 
-## `[time]`
+## `[general]`
 
-| Parameter | Type | Default | Unit | Description |
-|-----------|------|---------|------|-------------|
-| `start_year` | Int | — | year | Simulation start year |
-| `end_year` | Int | — | year | Simulation end year |
-| `start_doy` | Int | 1 | day of year | Simulation start day of year |
-| `end_doy` | Int | 365 | day of year | Simulation end day of year |
-| `time_step` | Int | 3600 | seconds | Time step per iteration |
-
----
-
-## `[location]`
-
-| Parameter | Type | Default | Unit | Description |
-|-----------|------|---------|------|-------------|
-| `latitude` | Float64 | — | degrees | Site latitude (positive = North) |
-
-> Longitude is not needed here. In NetCDF mode, it is read from the input data. In CSV mode, longitude is not required.
-
----
-
-## `[crop]`
+Core simulation settings that apply to both point and spatial modes.
 
 | Parameter | Type | Default | Unit | Description |
 |-----------|------|---------|------|-------------|
 | `crop_name` | String | — | — | Crop type: `"Maize"`, `"Rice"`, `"Wheat"`, or `"Soybeans"` |
-| `param_file` | String | — | — | Path to crop parameter TOML file (relative to config file) |
-| `planting_doy` | Int | — | day of year | Day of year for planting |
-| `is_irrigated` | Int | 0 | — | 0 = rainfed, 1 = irrigated |
-
----
-
-## `[soil]`
-
-| Parameter | Type | Default | Unit | Description |
-|-----------|------|---------|------|-------------|
-| `soil_type` | Int | 9 | — | Soil texture index (1–13). 9 = loam |
-| `n_fertilizer` | Float64 | 100.0 | kg N/ha | Nitrogen fertilizer application rate |
-| `thermal_time_requirement` | Float64 | 1500.0 | °C·day | Growing degree days required for maturity |
-
----
-
-## `[co2]`
-
-| Parameter | Type | Default | Unit | Description |
-|-----------|------|---------|------|-------------|
-| `fixed_ppm` | Float64 | 400.0 | ppm | Fallback CO₂ concentration |
-| `file` | String | "" | — | Path to CO₂ CSV file (relative to config file). Takes priority over `fixed_ppm` |
+| `crop_param` | String | — | — | Path to crop parameter TOML file (relative to config file) |
+| `start_year` | Int | — | year | Simulation start year |
+| `end_year` | Int | — | year | Simulation end year |
+| `start_doy` | Int | 1 | day of year | Simulation start day of year |
+| `end_doy` | Int | 365 | day of year | Simulation end day of year |
+| `time_step` | Int | 3600 | seconds | Time step per iteration, often for 1 hour which should be 3600s. |
+| `co2_ppm_default` | Float64 | 400.0 | ppm | Default CO₂ concentration. |
+| `co2_yearly_file` | String | "" | — | Path to CO₂ CSV file (relative to config file, or absolute). Takes priority over `co2_ppm_default` |
 
 **CO₂ file format**: CSV with header row and two columns:
 
@@ -65,15 +31,30 @@ year,co2_ppm
 ...
 ```
 
-If the file does not exist or the requested year is not found, `fixed_ppm` is used.
+If the file does not exist or the requested year is not found, `co2_ppm_default` is used.
 
 ---
 
-## `[input.csv]`
+## Simulation: choose `[point_simulation]` **or** `[spatial_simulation]`
+
+You must specify exactly one simulation mode. If both are present, `[point_simulation]` takes priority.
+
+---
+
+## `[point_simulation]`
+
+Point simulation mode with CSV weather data.
+
+| Parameter | Type | Default | Unit | Description |
+|-----------|------|---------|------|-------------|
+| `latitude` | Float64 | — | degrees | Site latitude (positive = North) |
+| `output_directory` | String | "output/" | — | Output directory path (relative to config file, or absolute) |
+
+### `[point_simulation.weather]`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `path` | String | — | Path to CSV forcing data file (relative to config file) |
+| `csv_path` | String | — | Path to CSV weather data file (relative to config file) |
 
 **CSV file format**: Must include a header row with the following columns:
 
@@ -88,7 +69,7 @@ If the file does not exist or the requested year is not found, `fixed_ppm` is us
 | `humidity` | Float64 | kg/kg | Specific humidity |
 | `wind` | Float64 | m/s | Wind speed |
 | `pressure` | Float64 | Pa | Surface air pressure |
-| `ozone` | Float64 | — | Ozone concentration (can be 0) |
+| `ozone` | Float64 | — | Ozone concentration (currently not in the model) |
 
 Example header and first row:
 
@@ -97,33 +78,62 @@ year,doy,tmax,tmin,radiation,precip,humidity,wind,pressure,ozone
 2021,1,290.15,276.58,104.51,0.0,0.00582,2.57,98652.0,26.0
 ```
 
+### `[point_simulation.management]`
+
+Management parameters for point simulation.
+
+| Parameter | Type | Default | Unit | Description |
+|-----------|------|---------|------|-------------|
+| `planting_doy` | Int | 120 | day of year | Day of year for planting |
+| `is_irrigated` | Int | 0 | — | 0 = rainfed, 1 = irrigated |
+| `soil_type` | Int | 9 | — | Soil texture index (1–13). 9 = loam |
+| `n_fertilizer` | Float64 | 100.0 | kg N/ha | Nitrogen fertilizer application rate |
+| `thermal_time_requirement` | Float64 | 1500.0 | °C·day | Growing degree days required for maturity |
+
+Output: CSV files (`yield_summary.csv`, `daily_output.csv`) in `output_directory`.
+
 ---
 
-## `[input.netcdf]`
+## `[spatial_simulation]`
 
-Choose either `[input.csv]` **or** `[input.netcdf]` — if you have chosen one, you can delete the lines about the other or just comment them out.
+Spatial simulation mode with NetCDF/TIFF data.
 
 ### Global settings
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `nthreads` | Int | 1 | Number of parallel threads for spatial simulation |
+| `output_directory` | String | "output/" | Output directory path (relative to config file, or absolute) |
+
+### Weather: `[spatial_simulation.weather]`
+
+Dimension name settings for weather NetCDF files:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
 | `lon_dim` | String | `"lon"` | Longitude dimension name in NetCDF files |
 | `lat_dim` | String | `"lat"` | Latitude dimension name in NetCDF files |
 | `time_dim` | String | `"time"` | Time dimension name in NetCDF files |
 
-### Per-variable specification: `[input.netcdf.<var>]`
+#### Per-variable specification: `[spatial_simulation.weather.<var>]`
 
-Each meteorological variable is specified in its own section. The key name (e.g., `tmx`) is the internal variable name used by MATCRO.
+Each meteorological variable is specified in its own section under `[spatial_simulation.weather]`. Use the following user-friendly variable names:
 
-Supported `<var>` variables: `tmx`, `tmn`, `prc`, `rsd`, `shm`, `wnd`, `prs`
+| Config key | Internal name | Description |
+|------------|---------------|-------------|
+| `temperature_max` | tmx | Daily maximum temperature |
+| `temperature_min` | tmn | Daily minimum temperature |
+| `precipitation` | prc | Precipitation rate |
+| `radiation` | rsd | Downward shortwave radiation |
+| `humidity` | shm | Specific humidity |
+| `wind_speed` | wnd | Wind speed |
+| `pressure` | prs | Surface air pressure |
 
 **Required parameters**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `file` | String | — | Path to NetCDF file (relative to config file, or absolute) |
-| `variable` | String | — | Variable name inside the NetCDF file (may differ from the section key, e.g., key `tmx` → variable `tasmax`) |
+| `variable` | String | — | Variable name inside the NetCDF file (may differ from the section key, e.g., key `temperature_max` → variable `tasmax`) |
 
 **Optional parameters**
 
@@ -131,11 +141,26 @@ Supported `<var>` variables: `tmx`, `tmn`, `prc`, `rsd`, `shm`, `wnd`, `prs`
 |-----------|------|---------|-------------|
 | `scale_factor` | Float64 | 1.0 | Scale factor applied as `value * scale_factor + add_offset` |
 | `add_offset` | Float64 | 0.0 | Offset applied as `value * scale_factor + add_offset` |
-| `height` | Float64 | 10.0 | Wind measurement height in meters (only for `wnd`) |
+| `height` | Float64 | 10.0 | Wind measurement height in meters (only for `wind_speed`) |
 
-### Management parameters: `[input.netcdf.<param_name>]`
+Example:
 
-Management parameters are also specified in their own sections under `[input.netcdf]`.
+```toml
+[spatial_simulation.weather.temperature_max]
+file = "data/netcdf/tmx.nc4"
+variable = "tmx"
+
+[spatial_simulation.weather.wind_speed]
+file = "data/netcdf/wnd.nc4"
+variable = "wnd"
+height = 10.0
+```
+
+### Management: `[spatial_simulation.management]`
+
+Management parameters for spatial simulation.
+
+#### Per-parameter specification: `[spatial_simulation.management.<param_name>]`
 
 Supported `<param_name>`: `planting_doy`, `is_irrigated`, `soil_type`, `n_fertilizer`, `thermal_time_requirement`
 
@@ -145,7 +170,7 @@ Supported `<param_name>`: `planting_doy`, `is_irrigated`, `soil_type`, `n_fertil
 | `file` | String | — | (Optional) Path to spatial file (NetCDF `.nc` or GeoTIFF `.tif`/`.tiff`) |
 | `variable` | String | — | (Required if `file` is set and is a NetCDF file) Variable name inside the NetCDF file |
 
-**Built-in defaults** (used when `[input.netcdf.<param_name>]` section is not present at all):
+**Built-in defaults** (used when `[spatial_simulation.management.<param_name>]` section is not present at all):
 
 | Parameter | Default |
 |-----------|---------|
@@ -175,17 +200,17 @@ The time dimension in management parameter NetCDF files can be named either `tim
 
 Priority: file (NC or TIF, with matching logic above) > `default_value` > built-in default.
 
-Example — uniform value only (no spatial NC file):
+Example — uniform value only (no spatial file):
 
 ```toml
-[input.netcdf.planting_doy]
+[spatial_simulation.management.planting_doy]
 default_value = 120
 ```
 
 Example — spatial NC file with fallback:
 
 ```toml
-[input.netcdf.soil_type]
+[spatial_simulation.management.soil_type]
 default_value = 9
 file = "data/netcdf/soil_type.nc"
 variable = "soil_type"
@@ -194,24 +219,56 @@ variable = "soil_type"
 Example — spatial TIF file with fallback:
 
 ```toml
-[input.netcdf.soil_type]
+[spatial_simulation.management.soil_type]
 default_value = 9
 file = "data/tif/soil_type.tif"
 ```
 
 > For TIF files, the `variable` key is not needed — the program reads the first band directly.
 
----
+### Boundary: `[spatial_simulation.boundary]` (optional)
 
-## `[output]`
+Boundary file for spatial filtering — only pixels within (or contacting) the boundary are simulated.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `directory` | String | — | Output directory path (relative to config file, or absolute) |
-| `format` | String | — | Output format: `"csv"` or `"raster"` (or `"geotiff"`) |
+| `file` | String | — | Path to boundary file (GeoJSON `.geojson`) |
+| `buffer_deg` | Float64 | 0.0 | Buffer distance (in degrees) for contact detection. Pixels within this distance of the boundary are also included. Default 0 means strict inside-polygon check. |
 
-When `format = "raster"` (or `"geotiff"`), spatial simulation outputs GeoTIFF files per year:
-- `yield_YYYY.tif` — Crop yield (Float64, kg/ha)
-- `harvest_doy_YYYY.tif` — Harvest day of year (Int32)
+**Example**:
 
-Both files use WGS84 (EPSG:4326) CRS with proper geotransform metadata.
+```toml
+[spatial_simulation.boundary]
+file = "data/boundaries/cornbelt_states.geojson"
+buffer_deg = 0.01   # ~1km buffer at mid-latitudes
+```
+
+The boundary CRS is automatically converted to WGS84 (EPSG:4326) if it differs from the input data.
+
+Output: GeoTIFF files per year in `output_directory`:
+- `yield_YYYY.tif`: Crop yield (kg/ha), Float64
+- `harvest_doy_YYYY.tif`: Harvest day of year, Int32
+- `LAI_max_YYYY.tif`: Seasonal maximum leaf area index (m²/m²), Float64
+- `biomass_aboveground_YYYY.tif`: Aboveground biomass at harvest (kg/ha), Float64
+
+All files use WGS84 (EPSG:4326) CRS with proper geotransform metadata.
+
+---
+
+## Multi-threading
+
+Spatial simulation uses Julia's built-in multi-threading via `Threads.@threads`. The thread count is controlled by the **Julia runtime**, not by the config file.
+
+**How to enable multi-threading:**
+
+```bash
+# Use N threads
+julia -t N src/00_matcro.jl config.toml
+
+# Auto-detect available CPU cores
+julia -t auto src/00_matcro.jl config.toml
+```
+
+Alternatively, set the `JULIA_NUM_THREADS` environment variable before launching Julia.
+
+**Recommendation**: Use physical cores minus 1 or 2, leaving headroom for your system. For example, on a 16-core machine, use 14 threads (`julia -t 14`).

@@ -1,137 +1,114 @@
 # MATCRO Configuration File
 
-[time]
+[general]
+crop_name = "Maize"        # Maize, Rice, Wheat, Soybeans
+crop_param = "params/maize.toml"
 start_year = 2000
 end_year = 2000
 start_doy = 1
 end_doy = 365
 time_step = 3600           # how many seconds in 1 step, normal should be 1 hour [seconds]
+co2_ppm_default = 400.0    # fallback CO2 concentration [ppm]
+co2_yearly_file = "data/co2/co2.csv"  # optional: CSV with columns year,co2_ppm
 
-[location]
+# ===== Input: choose ONE mode =====
+
+# Point simulation (CSV weather data)
+[point_simulation]
 latitude = 40.0            # [degree]
+output_directory = "output/"
 
-[crop]
-crop_name = "Maize"        # Maize, Rice, Wheat, Soybeans
-param_file = "params/maize.toml"
+[point_simulation.weather]
+csv_path = "data/forcing.csv"
+
+[point_simulation.management]
 planting_doy = 120         # day of year
 is_irrigated = 0           # 0 = rainfed, 1 = irrigated
-
-[soil]
 soil_type = 9              # soil texture index (1-13), 9=loam
 n_fertilizer = 100.0       # nitrogen fertilizer [kg N/ha]
 thermal_time_requirement = 1500.0  # GDH at maturity
 
-[co2]
-# If file is provided and exists, it takes priority over fixed_ppm.
-# If the file doesn't contain the requested year, fixed_ppm is used as fallback.
-fixed_ppm = 400.0          # fallback CO2 concentration [ppm]
-file = "data/co2/co2.csv"  # optional: CSV with columns year,co2_ppm
+# Spatial simulation (comment out [point_simulation] section above to use)
 
-# ===== Input: choose ONE format =====
-
-# CSV input
-[input.csv]
-path = "data/forcing.csv"
-
-# NetCDF input (comment out [input.csv] section above to use)
-# Each variable specifies its own file path (relative to config file location)
-# Management params default values go in [input.netcdf.<param_name>] with default_value
-
-# --- Example: single-year NetCDF files ---
-# [input.netcdf]
-# nthreads = 15             # parallel threads for spatial simulation
+# --- Example: multi-year NetCDF forcing + default management params ---
+# [spatial_simulation]
+# output_directory = "output/"
+#
+# [spatial_simulation.weather]
 # lon_dim = "lon"           # longitude dimension name in NetCDF
 # lat_dim = "lat"           # latitude dimension name in NetCDF
 # time_dim = "time"         # time dimension name in NetCDF
 #
-# [input.netcdf.tmx]
-# file = "data/netcdf/TMX_2021.nc"
+# [spatial_simulation.weather.temperature_max]
+# file = "data/netcdf/tmx.nc4"
 # variable = "tmx"
 #
-# [input.netcdf.tmn]
-# file = "data/netcdf/TMN_2021.nc"
+# [spatial_simulation.weather.temperature_min]
+# file = "data/netcdf/tmn.nc4"
 # variable = "tmn"
 #
-# [input.netcdf.prc]
-# file = "data/netcdf/PRC_2021.nc"
+# [spatial_simulation.weather.precipitation]
+# file = "data/netcdf/prc.nc4"
 # variable = "prc"
 #
-# [input.netcdf.rsd]
-# file = "data/netcdf/RSD_2021.nc"
+# [spatial_simulation.weather.radiation]
+# file = "data/netcdf/rsd.nc4"
 # variable = "rsd"
 #
-# [input.netcdf.shm]
-# file = "data/netcdf/SHM_2021.nc"
+# [spatial_simulation.weather.humidity]
+# file = "data/netcdf/shm.nc4"
 # variable = "shm"
 #
-# [input.netcdf.wnd]
-# file = "data/netcdf/WND_2021.nc"
+# [spatial_simulation.weather.wind_speed]
+# file = "data/netcdf/wnd.nc4"
 # variable = "wnd"
 # height = 10.0
 #
-# [input.netcdf.prs]
-# file = "data/netcdf/PRS_2021.nc"
+# [spatial_simulation.weather.pressure]
+# file = "data/netcdf/prs.nc4"
 # variable = "prs"
 #
-# # Management parameter defaults (no spatial NC file, use uniform values)
-# [input.netcdf.planting_doy]
+# [spatial_simulation.management]
+# [spatial_simulation.management.planting_doy]
 # default_value = 120
 #
-# [input.netcdf.is_irrigated]
+# [spatial_simulation.management.is_irrigated]
 # default_value = 0
 #
-# [input.netcdf.soil_type]
+# [spatial_simulation.management.soil_type]
 # default_value = 9
 #
-# [input.netcdf.n_fertilizer]
+# [spatial_simulation.management.n_fertilizer]
 # default_value = 100.0
 #
-# [input.netcdf.thermal_time_requirement]
+# [spatial_simulation.management.thermal_time_requirement]
 # default_value = 1500.0
 
-# --- Example: multi-year single file (raw ISIMIP format) ---
-# [input.netcdf]
-# nthreads = 15
+# --- Example: TIF management params + boundary filter ---
+# [spatial_simulation]
+# output_directory = "output/"
+#
+# [spatial_simulation.weather]
 # lon_dim = "lon"
 # lat_dim = "lat"
 # time_dim = "time"
 #
-# [input.netcdf.tmx]
-# file = "data/netcdf/raw_small/tmx.nc4"
+# [spatial_simulation.weather.temperature_max]
+# file = "data/netcdf/tmx.nc4"
 # variable = "tmx"
+# # ... other weather variables ...
 #
-# [input.netcdf.tmn]
-# file = "data/netcdf/raw_small/tmn.nc4"
-# variable = "tmn"
-#
-# [input.netcdf.prc]
-# file = "data/netcdf/raw_small/prc.nc4"
-# variable = "prc"
-#
-# [input.netcdf.rsd]
-# file = "data/netcdf/raw_small/rsd.nc4"
-# variable = "rsd"
-#
-# [input.netcdf.shm]
-# file = "data/netcdf/raw_small/shm.nc4"
-# variable = "shm"
-#
-# [input.netcdf.wnd]
-# file = "data/netcdf/raw_small/wnd.nc4"
-# variable = "wnd"
-# height = 10.0
-#
-# [input.netcdf.prs]
-# file = "data/netcdf/raw_small/prs.nc4"
-# variable = "prs"
-#
-# # Management parameter defaults
-# [input.netcdf.planting_doy]
+# [spatial_simulation.management]
+# [spatial_simulation.management.planting_doy]
 # default_value = 120
+# file = "data/tif/planting_doy.tif"
 #
-# [input.netcdf.is_irrigated]
-# default_value = 0
-
-[output]
-directory = "output/"
-format = "csv"             # "csv" or "raster"
+# [spatial_simulation.management.soil_type]
+# default_value = 9
+# file = "data/tif/soil_type.tif"
+#
+# # ... other management params ...
+#
+# [spatial_simulation.boundary]
+# file = "data/boundaries/region.geojson"
+# buffer_deg = 0.01
