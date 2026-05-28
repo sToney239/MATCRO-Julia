@@ -116,8 +116,8 @@ end
     fraction_starch_reserve::Float64 = 0.35    # Fortran: FSTR
 
     # ----- Specific leaf weight (→ crop_step!) -----
-    leaf_weight_asymptote::Float64 = 400.0     # Fortran: SLWYA
-    leaf_weight_intercept::Float64 = 700.0     # Fortran: SLWYB
+    leaf_weight_min::Float64 = 400.0     # Fortran: SLWYA
+    leaf_weight_max::Float64 = 700.0     # Fortran: SLWYB
     leaf_weight_decay_rate::Float64 = 3.0      # Fortran: SLWX
 
     # ----- Plant height -----
@@ -434,8 +434,8 @@ function read_crop_params(toml_path::String)::CropParameters
         dead_progress_3          = crop_params["dead_progress_3"],
         dead_ratio_3             = crop_params["dead_ratio_3"],
         fraction_starch_reserve  = crop_params["fraction_starch_reserve"],
-        leaf_weight_asymptote    = crop_params["leaf_weight_asymptote"],
-        leaf_weight_intercept    = crop_params["leaf_weight_intercept"],
+        leaf_weight_min    = crop_params["leaf_weight_min"],
+        leaf_weight_max    = crop_params["leaf_weight_max"],
         leaf_weight_decay_rate   = crop_params["leaf_weight_decay_rate"],
         height_coeff_a1          = crop_params["height_coeff_a1"],
         height_coeff_a2          = crop_params["height_coeff_a2"],

@@ -3,11 +3,7 @@
 const seconds_per_day = 86400.0 # how many seconds in a day
 
 
-# Vernalization temperature parameters (Eq.112)
-const TV1 = -4.0   # °C, lower bound
-const TV2 = 3.0    # °C, range start
-const TV3 = 10.0   # °C, range end
-const TV4 = 17.0   # °C, upper bound
+
 
 # Physics
 const karman_constant = 0.4        # von Karman constant

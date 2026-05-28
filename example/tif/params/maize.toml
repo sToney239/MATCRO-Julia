@@ -64,8 +64,8 @@ dead_ratio_3 = 0.0000003           # Fortran: DLVY3
 fraction_starch_reserve = 0.35     # Fortran: FSTR
 
 # ===== Specific leaf weight (SLW) =====
-leaf_weight_asymptote = 400.0      # SLW at DVS=0 [g/m²]; Fortran: SLWYA
-leaf_weight_intercept = 700.0      # SLW asymptote [g/m²]; Fortran: SLWYB
+leaf_weight_min = 400.0      # SLW at DVS=0 [g/m²]; Fortran: SLWYA
+leaf_weight_max = 700.0      # SLW asymptote [g/m²]; Fortran: SLWYB
 leaf_weight_decay_rate = 3.0       # SLW shape parameter; Fortran: SLWX
 
 # ===== Plant height =====

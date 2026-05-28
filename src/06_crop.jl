@@ -5,7 +5,7 @@
 
 
 # CFSR2GL: starch to glucose conversion factor
-const fraction_starch_convert = 1.11        
+const fraction_starch_convert = 1.11   
 
 # ============ mutable crop state ============
 @kwdef mutable struct CropState
@@ -80,11 +80,7 @@ function judge_planting!(crop::CropState, doy::Int, hour::Float64,
         crop.grain_biomass = 0.0
         crop.potential_grain_biomass = 0.0
 
-        crop.shoot_biomass = crop.leaf_biomass + 
-                             crop.stem_biomass +
-                             crop.storage_organ_biomass + 
-                             crop.reserved_starch_pool + 
-                             crop.available_glucose_pool
+        crop.shoot_biomass = 0.0
 
         crop.accumulated_thermal_time = 0.0
         crop.accumulated_vern_days = 0.0
@@ -124,6 +120,11 @@ function calc_development_stage!(crop::CropState, temperature::Float64, Δt::Int
         dvr = 0.0
     end
 
+    # Vernalization temperature parameters (Eq.112)
+    TV1 = -4.0   # °C, lower bound
+    TV2 = 3.0    # °C, range start
+    TV3 = 10.0   # °C, range end
+    TV4 = 17.0   # °C, upper bound
     # Vernalization factor (VF)
     vern_factor = 1.0
     if needs_vernalization > 0
@@ -189,18 +190,19 @@ function calc_loss_rates(crop::CropState, Δt::Int, half_progress::Float64,
         leaf_loss_ratio = dead_ratio_3
     end
 
-    # Eq.134: Starch remobilization timescale
+    # Eq.133: Leaf & root Loss
+    leaf_loss = (crop.leaf_biomass + crop.available_glucose_pool) * leaf_loss_ratio * Float64(Δt)
+    root_loss_ratio = 0.0
+    root_loss = crop.root_biomass * root_loss_ratio * Float64(Δt)
+    
+    # Time for Starch remobilization (10 days after heading)
+    # Preparing ration of leaf remobilization for Eq.134
     if growth_progress < half_progress
         starch_mobilization_time = 0.0
     else
         starch_mobilization_time = 10.0   # Bouman (2001) [days]
     end
-    root_loss_ratio = 0.0
-
-    # Eq.133: Loss rates
-    leaf_loss = (crop.leaf_biomass + crop.available_glucose_pool) * leaf_loss_ratio * Float64(Δt)
-    root_loss = crop.root_biomass * root_loss_ratio * Float64(Δt)
-
+    # Eq.134: Starch remobilization
     if starch_mobilization_time > 0.0
         starch_loss = crop.reserved_starch_pool * (1.0 / (starch_mobilization_time * seconds_per_day)) * Float64(Δt)
     else
@@ -237,7 +239,7 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
     glucose_pool = crop.available_glucose_pool
     glucose_pool_initial = glucose_pool
 
-    # Eq.119: Glucose supply = remobilization from starch
+    # Eq.119: glucose_pool(Glucose supply) = Net assimilation + remobilization from starch
     remobilized_glucose = starch_loss * fraction_starch_convert
 
     # Net assimilation → glucose: [mol(CO2)/m²/s] → [kg(CH2O)/ha/Δt]
@@ -259,11 +261,12 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
 
     #############################################################
     # Eq.130: Shoot partition ratio (Pr,sh)
+    # The proportion between total and shoot carbonhydrate
     if crop_name == "Maize"
         if growth_progress < shoot_progress_1
-            ratio_shoot_alloc = ((1.0 - shoot_alloc_ratio_1 - 0.5) / shoot_progress_1) * growth_progress + 0.5
+            ratio_shoot_alloc = linear_interpolate(growth_progress, 0.0, 0.5, shoot_progress_1, 1.0 - shoot_alloc_ratio_1)
         elseif growth_progress < shoot_progress_2
-            ratio_shoot_alloc = (shoot_alloc_ratio_1 / (shoot_progress_2 - shoot_progress_1)) * (growth_progress - shoot_progress_1) + 1.0 - shoot_alloc_ratio_1
+            ratio_shoot_alloc = linear_interpolate(growth_progress, shoot_progress_1, 1.0 - shoot_alloc_ratio_1, shoot_progress_2, 1.0)
         else
             ratio_shoot_alloc = 1.0
         end
@@ -271,7 +274,7 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
         if growth_progress < shoot_progress_1
             ratio_shoot_alloc = 1.0 - shoot_alloc_ratio_1
         elseif growth_progress < shoot_progress_2
-            ratio_shoot_alloc = 1.0 - shoot_alloc_ratio_1 * (shoot_progress_2 - growth_progress) / (shoot_progress_2 - shoot_progress_1)
+            ratio_shoot_alloc = linear_interpolate(growth_progress, shoot_progress_1, 1.0 - shoot_alloc_ratio_1, shoot_progress_2, 1.0)
         else
             ratio_shoot_alloc = 1.0
         end
@@ -285,8 +288,9 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
 
     #############################################################
     # Eq.131: Leaf partition ratio (Pr,lef)
+    # Between shoot and leaf, Fig 2a in Maize and Soy paper
     if growth_progress < leaf_progress_1
-        ratio_leaf_alloc = (leaf_alloc_ratio_1 - leaf_alloc_ratio_0) / leaf_progress_1 * growth_progress + leaf_alloc_ratio_0
+        ratio_leaf_alloc = linear_interpolate(growth_progress, 0.0, leaf_alloc_ratio_0, leaf_progress_1, leaf_alloc_ratio_1)
     elseif growth_progress < leaf_progress_2
         if crop.LAI < LAI_threshold_grain
             ratio_leaf_alloc = linear_interpolate(growth_progress, leaf_progress_1, leaf_alloc_ratio_1, leaf_progress_2, leaf_alloc_ratio_2)
@@ -305,6 +309,7 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
 
     #############################################################
     # Eq.132: Panicle partition ratio (Pr,pnc)
+    # Between shoot and Panicle, Fig 2b in Maize and Soy paper
     if growth_progress < panicle_progress_1
         ratio_panicle_alloc = panicle_alloc_ratio_1
     elseif growth_progress < panicle_progress_2
@@ -386,19 +391,19 @@ end
 # Eq.137: L = (Wlef + Wglu) / Slw
 # S_lw: specific leaf weight [kg / m^2]
 # Eq.138: Slw = Slw,mx + (Slw,mn - Slw,mx) * exp(-kSlw * DVS)
-function calc_LAI!(crop::CropState, leaf_weight_asymptote::Float64, leaf_weight_intercept::Float64,
+function calc_LAI!(crop::CropState, leaf_weight_min::Float64, leaf_weight_max::Float64,
                    leaf_weight_decay_rate::Float64, co2_ppm::Float64, crop_name::String)
     growth_progress = crop.development_stage
     # Eq.138: Specific leaf weight [kg/m²] (SLW)
-    slw = leaf_weight_intercept + (leaf_weight_asymptote - leaf_weight_intercept) * exp(-leaf_weight_decay_rate * growth_progress)
+    s_lw = leaf_weight_max + (leaf_weight_min - leaf_weight_max) * exp(-leaf_weight_decay_rate * growth_progress)
 
     # CO2 down-regulation for C3 crops
     if crop_name != "Maize"
-        slw = slw / ((0.856 * (1.0 + 1.035 * exp(-4.35e-3 * co2_ppm))) / (0.856 * (1.0 + 1.035 * exp(-4.35e-3 * 368.87))))
+        s_lw = s_lw / ((0.856 * (1.0 + 1.035 * exp(-4.35e-3 * co2_ppm))) / (0.856 * (1.0 + 1.035 * exp(-4.35e-3 * 368.87))))
     end
 
     # Eq.137: LAI
-    crop.LAI = (crop.leaf_biomass + crop.available_glucose_pool) / slw
+    crop.LAI = (crop.leaf_biomass + crop.available_glucose_pool) / s_lw
 
     if crop.LAI > crop.LAI_max
         crop.LAI_max = crop.LAI
@@ -643,7 +648,7 @@ function crop_step!(crop::CropState;
                     leaf_nitrogen_sensitivity::Float64,
 
                     LAI_threshold_grain::Float64, k_leaf_loss::Float64,
-                    leaf_weight_asymptote::Float64, leaf_weight_intercept::Float64,
+                    leaf_weight_min::Float64, leaf_weight_max::Float64,
                     leaf_weight_decay_rate::Float64,
                     max_crop_height::Float64,
                     root_growth_rate::Float64, max_root_length::Float64,
@@ -693,7 +698,7 @@ function crop_step!(crop::CropState;
                            losses.leaf_loss, losses.root_loss, losses.starch_loss)
 
             # 7. LAI
-            calc_LAI!(crop, leaf_weight_asymptote, leaf_weight_intercept, leaf_weight_decay_rate, co2_ppm, crop_name)
+            calc_LAI!(crop, leaf_weight_min, leaf_weight_max, leaf_weight_decay_rate, co2_ppm, crop_name)
 
             # 8. Height
             calc_height!(crop, half_progress, max_crop_height)
