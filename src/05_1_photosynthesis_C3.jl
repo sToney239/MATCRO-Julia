@@ -31,7 +31,7 @@ function leaf_photosynthesis_c3(;
     # ===== 3. Vcmax and Jmax (temperature-dependent) =====
     Vm = Vmax25 * 1e6 * exp(26.35 - 65330.0 / (leaf_temperature * R_vap * M_H2O)) * water_stress  # [μmol/m2/s]
     R_JV = 1.67 * (0.941 + 1.32e-4 * co2_ppm) / (0.941 + 1.32e-4 * 368.87)   # CO2 down-regulation
-    Jm = 1.67 * Vmax25 * 1e6 * exp(17.70 - 43900.0 / (leaf_temperature * R_vap * M_H2O)) * R_JV   # [μmol/m2/s]
+    Jm = 1.67 * Vmax25 * 1e6 * exp(17.70 - 43900.0 / (leaf_temperature * R_vap * M_H2O))   # [μmol/m2/s]
 
     # ===== 4. Dark respiration =====
     RSP_leaf = 0.015 * Vmax25 * 1e6 * exp(18.72 - 46390.0 / (leaf_temperature * R_vap * M_H2O))  # [μmol/m2/s]
@@ -75,103 +75,102 @@ function leaf_photosynthesis_c3(;
     limit_Rubisco_Ac = 0.0  # Rubisco-limited GPP [μmol/m2/s]
     limit_RuBP_Aj = 0.0  # RuBP-limited GPP [μmol/m2/s]
 
-    for i in 1:2
-        α = GB_CO2 * CO2_atmosphere
-        β = G1_CO2 * GB_CO2 * Rh - G0_CO2
-        γ = aa[i] * dd[i] + bb[i] * RSP_leaf
-        ζ = aa[i] - ee[i] * RSP_leaf
-        ω = CO2_atmosphere * GB_CO2 * ζ - γ * GB_CO2
-        ψ = ee[i] * CO2_atmosphere * GB_CO2 + ζ + bb[i] * GB_CO2
+    # Complex cube roots of unity (matching Fortran w, w2)
+    w  = ComplexF64(-1.0 + sqrt(3.0) * im) / 2.0
+    w2 = ComplexF64(-1.0 - sqrt(3.0) * im) / 2.0
 
-        a1 = ee[i] * β - ee[i] * GB_CO2
-        a2 = ee[i] * G0_CO2 * α - β * ψ + ee[i] * GB_CO2 * α + GB_CO2 * ζ
-        a3 = -G0_CO2 * α * ψ + β * ω - GB_CO2 * α * ζ
-        a4 = G0_CO2 * α * ω
+    for i in 1:2
+        ARFA = GB_CO2 * CO2_atmosphere
+        BETA = G1_CO2 * GB_CO2 * Rh - G0_CO2
+        GANM = aa[i] * dd[i] + bb[i] * RSP_leaf
+        ZETA = aa[i] - ee[i] * RSP_leaf
+        EATA = CO2_atmosphere * GB_CO2 * ZETA - GANM * GB_CO2
+        GZAI = ee[i] * CO2_atmosphere * GB_CO2 + ZETA + bb[i] * GB_CO2
+
+        a1 = ee[i] * BETA - ee[i] * GB_CO2
+        a2 = ee[i] * G0_CO2 * ARFA - BETA * GZAI + ee[i] * GB_CO2 * ARFA + GB_CO2 * ZETA
+        a3 = -G0_CO2 * ARFA * GZAI + BETA * EATA - GB_CO2 * ARFA * ZETA
+        a4 = G0_CO2 * ARFA * EATA
 
         # Normalize to monic cubic: x^3 + A*x^2 + B*x + C = 0
         A = a2 / a1
         B = a3 / a1
         C = a4 / a1
 
-        # Cardano's method (matching Fortran complex arithmetic)
+        # Cardano's method using complex arithmetic (matching Fortran exactly)
         p = B - A^2 / 3.0
         q = 2.0 / 27.0 * A^3 - A * B / 3.0 + C
 
         D1 = q^2 / 4.0 + p^3 / 27.0
 
-        # Three cubic roots via complex cube roots
-        if D1 >= 0.0
-            sqrt_D1 = sqrt(D1)
-            u_real = -q * 0.5 + sqrt_D1
-            v_real = -q * 0.5 - sqrt_D1
-            u = cbrt(u_real)
-            v = -p / (3.0 * u)
+        # Complex cube roots (same as Fortran: always use complex arithmetic)
+        uu = ComplexF64(-q * 0.5) + sqrt(ComplexF64(D1))
+        vv = ComplexF64(-q * 0.5) - sqrt(ComplexF64(D1))
 
-            X1 = u + v
-            # Two complex roots (not needed, Fortran picks real root first)
-            An1 = X1 - A / 3.0
-            An2 = NaN  # complex root, skip
-            An3 = NaN  # complex root, skip
-        else
-            # Three real roots
-            sqrt_neg_D1 = sqrt(-D1)
-            # u = complex(-q/2, sqrt_neg_D1), v = conj(u)
-            u_r, u_i = -q * 0.5, sqrt_neg_D1
-            r = sqrt(u_r^2 + u_i^2)
-            θ = atan(u_i, u_r)
+        u = uu^(1.0 / 3.0)
+        v = -p / (3.0 * u)
 
-            cbrt_r = cbrt(r)
-            X1 = 2.0 * cbrt_r * cos(θ / 3.0)
-            X2 = 2.0 * cbrt_r * cos((θ + 2π) / 3.0)
-            X3 = 2.0 * cbrt_r * cos((θ + 4π) / 3.0)
+        X1 = u + v
+        X2 = u * w + v * w2
+        X3 = u * w2 + v * w
 
-            An1 = X1 - A / 3.0
-            An2 = X2 - A / 3.0
-            An3 = X3 - A / 3.0
-        end
+        An1 = real(X1) - A / 3.0
+        An2 = real(X2) - A / 3.0
+        An3 = real(X3) - A / 3.0
+
+        # Imaginary parts for filtering (matching Fortran: imag(An) < tol)
+        im1 = abs(imag(X1))
+        im2 = abs(imag(X2))
+        im3 = abs(imag(X3))
+        im_tol = 1e-8
 
         # Quadratic solutions (An < 0 branch)
         b1 = ee[i] * G0_CO2 + ee[i] * GB_CO2
-        b2 = -G0_CO2 * ψ - GB_CO2 * ζ
-        b3 = G0_CO2 * ω
+        b2 = -G0_CO2 * GZAI - GB_CO2 * ZETA
+        b3 = G0_CO2 * EATA
 
         D2 = b2^2 - 4.0 * b1 * b3
-        An4 = D2 >= 0.0 ? (-b2 + sqrt(D2)) / (2.0 * b1) : NaN
-        An5 = D2 >= 0.0 ? (-b2 - sqrt(D2)) / (2.0 * b1) : NaN
-        An6 = 0.0
 
         # Select valid solution (following Fortran logic exactly)
-        solutions = [(An1, true), (An2, true), (An3, true), (An4, false), (An5, false), (An6, false)]
+        # Fortran iterates J=1..5, checking imag(An(J)) < tol first
+        # For J=1..3: An > 0, Gsc > 0, Ci > 0 (Ball-Berry stomata)
+        # For J=4..5: An < 0, Gsc > 0, Ci > 0 (minimum stomata)
+        An_vals = Float64[An1, An2, An3]
+        im_vals = Float64[im1, im2, im3]
         found = false
 
-        for (An_val, require_positive) in solutions
-            isnan(An_val) && continue
+        for j in 1:3
+            im_vals[j] >= im_tol && continue
+            An_val = An_vals[j]
+            An_val > 0.0 || continue
 
             Cs = CO2_atmosphere - An_val / GB_CO2
-
-            if require_positive
-                # J=1..3: use Ball-Berry for stomatal conductance
-                Cs == 0.0 && continue
-                Gsc = An_val * G1_CO2 * Rh / Cs + G0_CO2
-            else
-                # J=4..6: stomata at minimum conductance
-                Gsc = G0_CO2
-            end
-
+            Cs == 0.0 && continue
+            Gsc = An_val * G1_CO2 * Rh / Cs + G0_CO2
             Ci = Cs - An_val / Gsc
 
-            if require_positive
-                if An_val > 0.0 && Gsc > 0.0 && Ci > 0.0
-                    if i == 1
-                        limit_Rubisco_Ac = An_val + RSP_leaf
-                    else
-                        limit_RuBP_Aj = An_val + RSP_leaf
-                    end
-                    found = true
-                    break
+            if Gsc > 0.0 && Ci > 0.0
+                if i == 1
+                    limit_Rubisco_Ac = An_val + RSP_leaf
+                else
+                    limit_RuBP_Aj = An_val + RSP_leaf
                 end
-            else
-                if An_val < 0.0 && Gsc > 0.0 && Ci > 0.0
+                found = true
+                break
+            end
+        end
+
+        if !found
+            # Try quadratic solutions (J=4,5)
+            for sign_idx in 1:2
+                D2 >= 0.0 || continue
+                An_val = sign_idx == 1 ? (-b2 + sqrt(D2)) / (2.0 * b1) : (-b2 - sqrt(D2)) / (2.0 * b1)
+                An_val < 0.0 || continue
+
+                Gsc = G0_CO2
+                Ci = CO2_atmosphere - An_val / GB_CO2 - An_val / Gsc
+
+                if Gsc > 0.0 && Ci > 0.0
                     if i == 1
                         limit_Rubisco_Ac = An_val + RSP_leaf
                     else
@@ -184,7 +183,12 @@ function leaf_photosynthesis_c3(;
         end
 
         if !found
-            error("leaf_photosynthesis_c3: no valid solution for limitation case $i")
+            # Fallback: An = 0 (J=6 in Fortran)
+            if i == 1
+                limit_Rubisco_Ac = RSP_leaf
+            else
+                limit_RuBP_Aj = RSP_leaf
+            end
         end
     end
 

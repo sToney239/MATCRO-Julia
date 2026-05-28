@@ -1,0 +1,27 @@
+# MATCRO CSV Example
+# Usage: julia src/00_matcro.jl example/csv/config.toml
+
+[general]
+crop_name = "Soybeans"
+crop_param = "soybean.toml"
+start_year = 2021
+end_year = 2021
+start_doy = 1
+end_doy = 365
+time_step = 3600
+co2_ppm_default = 438.0
+co2_yearly_file = "co2.csv"
+
+[point_simulation]
+latitude = 38.25
+output_directory = "output/"
+
+[point_simulation.weather]
+csv_path = "weather_data.csv"
+
+[point_simulation.management]
+planting_doy = 117
+is_irrigated = 1
+soil_type = 12
+n_fertilizer = 65.0
+thermal_time_requirement = 1441.0

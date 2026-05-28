@@ -189,6 +189,7 @@ function run_simulation(config_path::String)
                 )
 
                 # ----- PHSYN (photosynthesis → GPP, RSP, TSP) -----
+                water_stress_before_phsyn = water_stress  # save for debug output
                 phsyn_result = calc_photosynthesis(;
                     Qp_sunlit=rad_result.PAR_abs_sunlit_leaf,
                     Qp_shade=rad_result.PAR_abs_shade_leaf,
@@ -286,7 +287,7 @@ function run_simulation(config_path::String)
                     layer_water=layer_water,
                     transpiration=tsp_W,
                     W2SF=prc,
-                    z_rt=crop.root_length,
+                    depth_root=crop.root_length,
                     is_irrigated=config.is_irrigated,
                     Δt=config.time_step,
                     soil_type_i=config.soil_type,
@@ -301,9 +302,8 @@ function run_simulation(config_path::String)
                 water_stress = soil_result.water_stress
 
                 # Write hourly debug output (all modules, matching Fortran debug_module_outputs.txt)
-                #= Printf.@printf(debug_file, "%d,%d,%.1f,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e,%.7e\n",
-                    year, doy, hour,
-                    tmp_K, rsd, shm, wnd, prs,
+                Printf.@printf(debug_file, "%5d%4d%6.1f", year, doy, hour)
+                for val in (tmp_K, rsd, shm, wnd, prs,
                     water_stress_before_phsyn, crop.LAI, crop.development_stage,
                     gpp, rsp, tsp,
                     crop.root_length,
@@ -312,7 +312,10 @@ function run_simulation(config_path::String)
                     rad_result.LAI_sunlit, rad_result.LAI_shade,
                     crop.leaf_biomass, crop.stem_biomass, crop.storage_organ_biomass,
                     crop.root_biomass, crop.reserved_starch_pool,
-                    crop.available_glucose_pool, crop.dead_leaf_biomass) =#
+                    crop.available_glucose_pool, crop.dead_leaf_biomass)
+                    Printf.@printf(debug_file, "%15.7E", val)
+                end
+                Printf.@printf(debug_file, "\n")
 
             end # hourly loop
 

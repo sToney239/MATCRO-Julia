@@ -270,6 +270,20 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
         else
             ratio_shoot_alloc = 1.0
         end
+    elseif crop_name == "Rice"
+        progress_transplant_start = 0.06     # DVS at transplanting and  (Dvs,tr)
+        progress_transplant_end = 0.08       # DVS at transplanting shock ends (Dvs,te)
+        if growth_progress < progress_transplant_start
+            ratio_shoot_alloc = 1.0 - shoot_alloc_ratio_1
+        elseif growth_progress < progress_transplant_end
+            ratio_shoot_alloc = 0
+        elseif growth_progress < shoot_progress_2
+            ratio_shoot_alloc = 1.0 - shoot_alloc_ratio_1
+        elseif growth_progress < shoot_progress_2
+            ratio_shoot_alloc = linear_interpolate(growth_progress, shoot_progress_1, 1.0 - shoot_alloc_ratio_1, shoot_progress_2, 1.0)
+        else
+            ratio_shoot_alloc = 1.0
+        end
     else
         if growth_progress < shoot_progress_1
             ratio_shoot_alloc = 1.0 - shoot_alloc_ratio_1
@@ -570,21 +584,24 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
         sln = sln * (1.037 - 8.33e-5 * co2_ppm) / (1.037 - 8.33e-5 * 368.87)
 
     elseif crop_name == "Soybeans"
-        # Soybeans: use parameters directly
-        y1 = 0.7742242627
-        y2 = leaf_nitrogen_max - (leaf_nitrogen_max - leaf_nitrogen_min) * exp(-leaf_nitrogen_sensitivity * n_fertilizer)
+        # Soybeans: 4-segment piecewise (matching Fortran CALSLN)
+        # Breakpoints: 0, x1=SLNX1, x2=SLNX2, x3=SLNX3, 1.0
+        y0 = 0.75
+        y1 = 2.25
+        y2 = 1.7
         y3 = (2.25 - 1.8) / 300.0 * n_fertilizer + 1.8
+        y4 = 0.75
 
         if growth_progress < 0.0
             sln = 0.0
         elseif growth_progress < x1
-            sln = y1
+            sln = linear_interpolate(growth_progress, 0.0, y0, x1, y1)
         elseif growth_progress < x2
             sln = linear_interpolate(growth_progress, x1, y1, x2, y2)
         elseif growth_progress < x3
             sln = linear_interpolate(growth_progress, x2, y2, x3, y3)
         else
-            sln = 0.0
+            sln = linear_interpolate(growth_progress, x3, y3, 1.0, y4)
         end
 
         # CO2 down-regulation (C3)

@@ -26,7 +26,7 @@ planting_doy = 120         # day of year
 is_irrigated = 0           # 0 = rainfed, 1 = irrigated
 soil_type = 9              # soil texture index (1-13), 9=loam
 n_fertilizer = 100.0       # nitrogen fertilizer [kg N/ha]
-thermal_time_requirement = 1500.0  # GDH at maturity
+thermal_time_requirement = 1500.0  # GDD at maturity; for rice maybe = 167759940 / 3600 / 24
 
 # Spatial simulation (comment out [point_simulation] section above to use)
 
