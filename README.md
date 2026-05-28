@@ -6,7 +6,7 @@ This is the Julia version of the MATCRO crop model, originally written in Fortra
 - Masutomi, Y.: Improvement of MATCRO model for climate change impact assessment on global crop production, EGUsphere [preprint], https://doi.org/10.5194/egusphere-2025-1885, 2025.
 - Masutomi, Y.: MATCRO-SOM: a new soil organic matter model considering priming effects for climate change impact assessment on global crop production, Geosci. Model Dev., 18, 8801–8826, https://doi.org/10.5194/gmd-18-8801-2025, 2025.
 
-> **Warning:** Only the C4 crop (Maize) pathway has been cross-validated against the original Fortran code. The C3 photosynthesis module (`src/05_1_photosynthesis_C3.jl`) for Soybeans (as well as Rice) still requires verification. Please wait for future updates.
+> **Warning:** Only the C4 crop (Maize) pathway has been fully cross-validated against the original Fortran code. The module for Soybeans is only partly tested, and currently for rice and wheats, no test has been done.
 
 ## Features of this version
 
