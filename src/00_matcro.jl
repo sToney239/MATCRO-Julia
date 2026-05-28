@@ -129,16 +129,6 @@ function run_simulation(config_path::String)
             # Hourly loop
             n_steps = 86400 ÷ config.time_step
 
-            # Debug output file for module-level comparison
-            debug_path = joinpath(config.output_dir, "debug_module_outputs.csv")
-            mkpath(config.output_dir)
-            if !isfile(debug_path)
-                debug_file = open(debug_path, "w")
-                println(debug_file, "year,doy,hour,TMP,RSD,SHM,WND,PRS,WSTRS_in,LAI,DVS,GPP,RSP,TSP,ROT,QPARSNLF,QPARSHLF,VMXSNLF,VMXSHLF,LAISN,LAISH,WLF,WST,WSO,WRT,WSR,WAR,WDL")
-            else
-                debug_file = open(debug_path, "a")
-            end
-
             for ihour in 1:n_steps
                 hour = (Float64(ihour) - 0.5) * Float64(config.time_step) / 3600.0
 
@@ -189,7 +179,6 @@ function run_simulation(config_path::String)
                 )
 
                 # ----- PHSYN (photosynthesis → GPP, RSP, TSP) -----
-                water_stress_before_phsyn = water_stress  # save for debug output
                 phsyn_result = calc_photosynthesis(;
                     Qp_sunlit=rad_result.PAR_abs_sunlit_leaf,
                     Qp_shade=rad_result.PAR_abs_shade_leaf,
@@ -301,25 +290,7 @@ function run_simulation(config_path::String)
                 )
                 water_stress = soil_result.water_stress
 
-                # Write hourly debug output (all modules, matching Fortran debug_module_outputs.txt)
-                Printf.@printf(debug_file, "%5d%4d%6.1f", year, doy, hour)
-                for val in (tmp_K, rsd, shm, wnd, prs,
-                    water_stress_before_phsyn, crop.LAI, crop.development_stage,
-                    gpp, rsp, tsp,
-                    crop.root_length,
-                    rad_result.PAR_abs_sunlit_leaf, rad_result.PAR_abs_shade_leaf,
-                    rad_result.Vmax_sunlit_leaf, rad_result.Vmax_shade_leaf,
-                    rad_result.LAI_sunlit, rad_result.LAI_shade,
-                    crop.leaf_biomass, crop.stem_biomass, crop.storage_organ_biomass,
-                    crop.root_biomass, crop.reserved_starch_pool,
-                    crop.available_glucose_pool, crop.dead_leaf_biomass)
-                    Printf.@printf(debug_file, "%15.7E", val)
-                end
-                Printf.@printf(debug_file, "\n")
-
             end # hourly loop
-
-            close(debug_file)
 
             # Record daily state
             push!(daily_records, (
