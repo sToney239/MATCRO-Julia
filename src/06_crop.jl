@@ -426,14 +426,27 @@ end
 
 # ============ 8. Crop height (Eq.139) ============
 # Eq.139: hgt = haa * (DVS/hDVS) before heading; hgt = haa after heading
-function calc_height!(crop::CropState, half_progress::Float64, max_crop_height::Float64)
+function calc_height!(crop::CropState, half_progress::Float64, max_crop_height::Float64, crop_name::String)
     growth_progress = crop.development_stage
-
-    if growth_progress < half_progress
-        crop.crop_height = max_crop_height * (growth_progress / half_progress)
+    
+    if crop_name == "Rice"
+        if growth_progress < half_progress
+            height_coeff_a1 = 0.439  
+            height_coeff_b1 = 0.675            
+            crop.crop_height = height_coeff_a1 * crop.LAI^height_coeff_b1 
+        else
+            height_coeff_a2 = 0.366      
+            height_coeff_b2 = 0.318            
+            crop.crop_height = height_coeff_a2 * crop.LAI^height_coeff_b2
+        end
     else
-        crop.crop_height = max_crop_height
+        if growth_progress < half_progress
+            crop.crop_height = max_crop_height * (growth_progress / half_progress)
+        else
+            crop.crop_height = max_crop_height
+        end
     end
+     
 end
 
 # ============ 9. Root length (Eq.140) ============
@@ -718,7 +731,7 @@ function crop_step!(crop::CropState;
             calc_LAI!(crop, leaf_weight_min, leaf_weight_max, leaf_weight_decay_rate, co2_ppm, crop_name)
 
             # 8. Height
-            calc_height!(crop, half_progress, max_crop_height)
+            calc_height!(crop, half_progress, max_crop_height, crop_name)
 
             # 9. Root length
             calc_root_length!(crop, root_growth_rate, max_root_length, Δt)
