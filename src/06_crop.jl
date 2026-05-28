@@ -1,7 +1,7 @@
 # CROP - Crop growth module
 # Paper: Masutomi et al. (2016) https://doi.org/10.5194/gmd-9-4133-2016
 # Merged from maize/SUB_CROP.f90 and soy/SUB_CROP.f90
-# Crop-specific branches: Maize PRTSHT, CALSLN Soybeans/Maize, CALLAI CO2 down-regulation
+# Crop-specific branches: Maize PRTSHT, CALSLN Soybean/Maize, CALLAI CO2 down-regulation
 
 
 # CFSR2GL: starch to glucose conversion factor
@@ -583,8 +583,8 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
         # CO2 down-regulation (C3 crops)
         sln = sln * (1.037 - 8.33e-5 * co2_ppm) / (1.037 - 8.33e-5 * 368.87)
 
-    elseif crop_name == "Soybeans"
-        # Soybeans: 4-segment piecewise (matching Fortran CALSLN)
+    elseif crop_name == "Soybean"
+        # Soybean: 4-segment piecewise (matching Fortran CALSLN)
         # Breakpoints: 0, x1=SLNX1, x2=SLNX2, x3=SLNX3, 1.0
         y0 = 0.75
         y1 = 2.25
@@ -626,7 +626,7 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
         # No CO2 down-regulation for Maize (C4 crop)
 
     else
-        error("Unknown crop: $crop_name. Use Rice, Wheat, Soybeans, or Maize")
+        error("Unknown crop: $crop_name. Use Rice, Wheat, Soybean, or Maize")
     end
 
     crop.leaf_nitrogen = sln

@@ -1,4 +1,4 @@
-# LEAF_PHSYN_C3 - C3 Crop Leaf Photosynthesis (Rice, Wheat, Soybeans)
+# LEAF_PHSYN_C3 - C3 Crop Leaf Photosynthesis (Rice, Wheat, Soybean)
 # Based on: Masutomi et al. (2016), Bernacchi et al. (2001, 2003), Farquhar et al. (1980)
 # CO2 down-regulation: R_JV factor scales Jmax with CO2
 # Paper https://doi.org/10.5194/egusphere-2025-1885

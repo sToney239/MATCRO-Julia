@@ -271,14 +271,14 @@ function calc_soil_water(;
         if crop_name == "Rice"
             # Paddy: FAW based on porosity (flooded = no stress), threshold=0.8
             FSTRS = FAWRICE[i] > 0.8 ? 1.0 : FAWRICE[i] / 0.8
-        elseif crop_name == "Soybeans"
+        elseif crop_name == "Soybean"
             # FAO56-style, threshold=0.5
             FSTRS = FAW[i] > 0.5 ? 1.0 : FAW[i] / 0.5
         elseif crop_name == "Wheat" || crop_name == "Maize"
             # FAO56 p=0.55 → threshold=0.45
             FSTRS = FAW[i] > 0.45 ? 1.0 : FAW[i] / 0.45
         else
-            error("Unknown crop: $crop_name. Use Rice, Wheat, Soybeans, or Maize")
+            error("Unknown crop: $crop_name. Use Rice, Wheat, Soybean, or Maize")
         end
         # Eq.78: weight by root distribution
         WSTRS += FSTRS * f_r[i]

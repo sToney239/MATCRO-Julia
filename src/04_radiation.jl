@@ -22,7 +22,7 @@ function calc_radiation(;
     lat::Float64,            # latitude [degree]
     doy::Int,                # day of year D_oy
     hour::Float64,           # hour of day
-    crop_name::String,       # crop name ("Rice","Wheat","Soybeans","Maize")
+    crop_name::String,       # crop name ("Rice","Wheat","Soybean","Maize")
     development_stage::Float64)  # development stage [-]
 
     # ===== 1. Solar geometry =====
@@ -57,7 +57,7 @@ function calc_radiation(;
     # Masutomi et al. (2016)
     if crop_name == "Rice" || crop_name == "Wheat"
         Vmax_top = min(87.04 * (leaf_nitrogen - 0.487), 138.77)             # [μmol/m²/s]
-    elseif crop_name == "Soybeans"
+    elseif crop_name == "Soybean"
         Vmax_top = min(max(-18.516 * leaf_nitrogen^2 + 114.33 * leaf_nitrogen - 73.336, 0.0), 103.0)
     elseif crop_name == "Maize"
         if development_stage < 0.52
@@ -70,7 +70,7 @@ function calc_radiation(;
             error("Maize development_stage=$development_stage out of range (must be < 1.01)")
         end
     else
-        error("Unknown crop: $crop_name. Use Rice, Wheat, Soybeans, or Maize")
+        error("Unknown crop: $crop_name. Use Rice, Wheat, Soybean, or Maize")
     end
 
     # Canopy-average Vmax (CLM scheme)

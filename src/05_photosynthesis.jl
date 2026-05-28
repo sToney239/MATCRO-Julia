@@ -26,7 +26,7 @@ function calc_photosynthesis(;
     btheta::Float64,              # Collatz coupling parameter (co-limitation vs TPU/PEP)
     m_H2O::Float64 = 4.0,        # Ball-Berry slope (H2O)
     b_H2O::Float64 = 0.04,       # Ball-Berry intercept (H2O)
-    crop_name::String = "Soybeans")  # Crop name: "Rice","Wheat","Soybeans","Maize"
+    crop_name::String = "Soybean")  # Crop name: "Rice","Wheat","Soybean","Maize"
 
     LAI_total = LAI_sunlit + LAI_shade
 

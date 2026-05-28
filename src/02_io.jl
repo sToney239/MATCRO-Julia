@@ -19,7 +19,7 @@ using TOML
     latitude::Float64          # [degree]
 
     # Crop
-    crop_name::String          # "Maize", "Rice", "Wheat", "Soybeans"
+    crop_name::String          # "Maize", "Rice", "Wheat", "Soybean"
     crop_param_file::String    # path to TOML parameter file
     planting_doy::Int          # planting day of year
     is_irrigated::Int          # 0 = rainfed, 1 = irrigated
