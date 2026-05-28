@@ -3,10 +3,6 @@
 # CO2 down-regulation: R_JV factor scales Jmax with CO2
 # Paper https://doi.org/10.5194/egusphere-2025-1885
 
-
-# Additional C3 constants
-const PO2 = 20900.0  # Atmospheric O2 partial pressure [Pa]
-
 # ============ main function ============
 function leaf_photosynthesis_c3(;
     leaf_temperature::Float64,      # Leaf temperature [K]
@@ -41,6 +37,7 @@ function leaf_photosynthesis_c3(;
     RSP_leaf = 0.015 * Vmax25 * 1e6 * exp(18.72 - 46390.0 / (leaf_temperature * R_vap * M_H2O))  # [μmol/m2/s]
 
     # ===== 5. Kc*(1 + O2/Ko) - Michaelis-Menten composite =====
+    PO2 = 20900.0  # Atmospheric O2 partial pressure [Pa]
     RRKK = Kc * (1.0 + (PO2 / pressure) / Ko)  # [μmol/mol]
 
     # ===== 6. Aerodynamic resistance (FAO56 P20) =====
@@ -79,17 +76,17 @@ function leaf_photosynthesis_c3(;
     limit_RuBP_Aj = 0.0  # RuBP-limited GPP [μmol/m2/s]
 
     for i in 1:2
-        ARFA = GB_CO2 * CO2_atmosphere
-        BETA = G1_CO2 * GB_CO2 * Rh - G0_CO2
-        GANM = aa[i] * dd[i] + bb[i] * RSP_leaf
-        ZETA = aa[i] - ee[i] * RSP_leaf
-        EATA = CO2_atmosphere * GB_CO2 * ZETA - GANM * GB_CO2
-        GZAI = ee[i] * CO2_atmosphere * GB_CO2 + ZETA + bb[i] * GB_CO2
+        α = GB_CO2 * CO2_atmosphere
+        β = G1_CO2 * GB_CO2 * Rh - G0_CO2
+        γ = aa[i] * dd[i] + bb[i] * RSP_leaf
+        ζ = aa[i] - ee[i] * RSP_leaf
+        ω = CO2_atmosphere * GB_CO2 * ζ - γ * GB_CO2
+        ψ = ee[i] * CO2_atmosphere * GB_CO2 + ζ + bb[i] * GB_CO2
 
-        a1 = ee[i] * BETA - ee[i] * GB_CO2
-        a2 = ee[i] * G0_CO2 * ARFA - BETA * GZAI + ee[i] * GB_CO2 * ARFA + GB_CO2 * ZETA
-        a3 = -G0_CO2 * ARFA * GZAI + BETA * EATA - GB_CO2 * ARFA * ZETA
-        a4 = G0_CO2 * ARFA * EATA
+        a1 = ee[i] * β - ee[i] * GB_CO2
+        a2 = ee[i] * G0_CO2 * α - β * ψ + ee[i] * GB_CO2 * α + GB_CO2 * ζ
+        a3 = -G0_CO2 * α * ψ + β * ω - GB_CO2 * α * ζ
+        a4 = G0_CO2 * α * ω
 
         # Normalize to monic cubic: x^3 + A*x^2 + B*x + C = 0
         A = a2 / a1
@@ -121,12 +118,12 @@ function leaf_photosynthesis_c3(;
             # u = complex(-q/2, sqrt_neg_D1), v = conj(u)
             u_r, u_i = -q * 0.5, sqrt_neg_D1
             r = sqrt(u_r^2 + u_i^2)
-            theta = atan(u_i, u_r)
+            θ = atan(u_i, u_r)
 
             cbrt_r = cbrt(r)
-            X1 = 2.0 * cbrt_r * cos(theta / 3.0)
-            X2 = 2.0 * cbrt_r * cos((theta + 2π) / 3.0)
-            X3 = 2.0 * cbrt_r * cos((theta + 4π) / 3.0)
+            X1 = 2.0 * cbrt_r * cos(θ / 3.0)
+            X2 = 2.0 * cbrt_r * cos((θ + 2π) / 3.0)
+            X3 = 2.0 * cbrt_r * cos((θ + 4π) / 3.0)
 
             An1 = X1 - A / 3.0
             An2 = X2 - A / 3.0
@@ -135,8 +132,8 @@ function leaf_photosynthesis_c3(;
 
         # Quadratic solutions (An < 0 branch)
         b1 = ee[i] * G0_CO2 + ee[i] * GB_CO2
-        b2 = -G0_CO2 * GZAI - GB_CO2 * ZETA
-        b3 = G0_CO2 * EATA
+        b2 = -G0_CO2 * ψ - GB_CO2 * ζ
+        b3 = G0_CO2 * ω
 
         D2 = b2^2 - 4.0 * b1 * b3
         An4 = D2 >= 0.0 ? (-b2 + sqrt(D2)) / (2.0 * b1) : NaN

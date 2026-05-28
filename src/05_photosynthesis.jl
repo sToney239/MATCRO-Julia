@@ -35,12 +35,12 @@ function calc_photosynthesis(;
     end
 
     # Select leaf-level function based on crop type
-    leaf_fn = crop_name == "Maize" ? leaf_photosynthesis_c4 : leaf_photosynthesis_c3
+    photosynthesis_function = crop_name == "Maize" ? leaf_photosynthesis_c4 : leaf_photosynthesis_c3
 
     # ----- Sunlit leaves -----
-    # Fortran checks only LAISN > 0, not VMXSNLF > 0
+    # both C3 & C4 leaves us Vmax25_sunlit
     if LAI_sunlit > 0.0
-        r_sun = leaf_fn(;
+        r_sun = photosynthesis_function(;
             leaf_temperature=leaf_temperature, wind_speed=wind_speed,
             specific_humidity=specific_humidity, pressure=pressure,
             co2_ppm=co2_ppm, water_stress=water_stress,
@@ -52,12 +52,11 @@ function calc_photosynthesis(;
     end
 
     # ----- Shade leaves -----
-    # C4 (Maize): shade leaves use Vmax25_sunlit (matching Fortran SUB_PHSYN.f90)
     # C3: shade leaves use Vmax25_shade
+    # C4: shade leaves use Vmax25_sunlit
     Vmax25_shade_eff = crop_name == "Maize" ? Vmax25_sunlit : Vmax25_shade
-    # Fortran checks only LAISH > 0, not Vmax25 > 0
     if LAI_shade > 0.0
-        r_shade = leaf_fn(;
+        r_shade = photosynthesis_function(;
             leaf_temperature=leaf_temperature, wind_speed=wind_speed,
             specific_humidity=specific_humidity, pressure=pressure,
             co2_ppm=co2_ppm, water_stress=water_stress,
