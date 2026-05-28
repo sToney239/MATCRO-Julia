@@ -624,7 +624,7 @@ function run_pixel_spatial(config::Config, params::CropParameters,
             tsp_W = tsp * L_vaporization
             soil_result = calc_soil_water(;
                 layer_water=layer_water, transpiration=tsp_W,
-                W2SF=precip_hourly, z_rt=crop.root_length,
+                W2SF=precip_hourly, depth_root=crop.root_length,
                 is_irrigated=Int(p_is_irrigated), Δt=Δt,
                 soil_type_i=Int(p_soil_type), temperature=temperature_K,
                 pressure=pressure_hourly, wind_speed=wind_hourly,

@@ -26,7 +26,7 @@ function calc_soil_water(;
     layer_water::Vector{Float64},    # soil water content per layer [m³/m³]
     transpiration::Float64,          # transpiration E_t [W/m²]
     W2SF::Float64,                   # water to soil surface F_c [kg/m²/s]
-    z_rt::Float64,                   # rooting depth z_rt [m]
+    depth_root::Float64,             # rooting depth z_rt [m]
     is_irrigated::Int,               # irrigation flag (0=rainfed, 1=flooded paddy)
     Δt::Int,                         # time step Δt [s]
     soil_type_i::Int,                # soil texture index (1-13)
@@ -46,16 +46,20 @@ function calc_soil_water(;
     wilting_point = wilting_point_T[soil_type_i]           # w_wlt: wilting point [-]
     field_capacity = field_capacity_T[soil_type_i]             # field capacity [-]
 
-    # eq.57
-    # ADSW: Air-dried soil water: phi=-30000000 [Pa] P107 in Saishindojyogaku
+    # θ = θ_saturation * (ψ_air_dryed / ψ_sat)^(-1.0 / B_frac)
+    # absolute_potential_total_soil_ =-3e7 [Pa] (measured value, P107 in Saishindojyogaku)
+    # ψ_air_dryed = absolute_potential_total_soil_ / ρ_water
+    # θ_saturation = porosity
+    # ADSW: Air-dried soil water
+    # when soil water reach such threshold, no more evaporation
     ADSW = porosity * ((-3e7 / ρ_water) / ψ_sat)^(-1.0 / B_frac)
 
 
     # ===== 2. Layer width / depth / soil water content =====
     layer_width_ave = [(layer_width[i] + layer_width[i+1]) * 0.5 for i in 1:n_layer-1]
-    DPTH = zeros(Float64, n_layer + 1)   # DPTH[1]=0, DPTH[i+1]=depth to bottom of layer i
+    depth = zeros(Float64, n_layer + 1)   # depth[1]=0, depth[i+1]=depth to bottom of layer i
     for i in 1:n_layer
-        DPTH[i+1] = i == 1 ? layer_width[1] : DPTH[i] + layer_width[i]
+        depth[i+1] = i == 1 ? layer_width[1] : depth[i] + layer_width[i]
     end
 
     # Clamp soil water
@@ -68,26 +72,27 @@ function calc_soil_water(;
     lowest_root_layer_num = 0  # Index of the lowest layer where root exists
     f_r = zeros(Float64, n_layer)
 
-    if z_rt > 0.0
+    if depth_root > 0.0
         for i in 1:n_layer
-            if z_rt < DPTH[i+1]
+            if depth_root < depth[i+1]
                 lowest_root_layer_num = i
                 break
             end
         end
 
         for i in 1:n_layer
-            d_top = DPTH[i]
-            d_bot = DPTH[i+1]
+            d_top = depth[i]
+            d_bot = depth[i+1]
             if i < lowest_root_layer_num
-                # Eq.59: integrate f_r(z) = ∫ (3/2)(z_rt²-z²)/z_rt³ over [d_top, d_bot]
+                # Eq.59: integrate f_r(z) = ∫ (3/2)(z_rt-z²)/z_rt³ over [d_top, d_bot]
                 # the above formula is the derivative version 
                 # the cumulative version should be
                 # 1.5 / z_rt^3 * (z_rt^2 * z - 1/3 * z^3)
-                f_r[i] = 1.5 / z_rt^3 * (z_rt^2 * d_bot - d_bot^3 / 3 - (z_rt^2 * d_top - d_top^3 / 3))
+                # f_r[i] should be the rood distribution in layer i
+                f_r[i] = 1.5 / depth_root^3 * (depth_root^2 * d_bot - d_bot^3 / 3 - (depth_root^2 * d_top - d_top^3 / 3))
             elseif i == lowest_root_layer_num
-                # Root tip in this layer: integrate from d_top to z_rt
-                f_r[i] = 1.5 / z_rt^3 * (2.0 * z_rt^3 / 3 - (z_rt^2 * d_top - d_top^3 / 3))
+                # Root tip in this layer: integrate from d_top to depth_root
+                f_r[i] = 1.5 / depth_root^3 * (2.0 * depth_root^3 / 3 - (depth_root^2 * d_top - d_top^3 / 3))
             else
                 f_r[i] = 0.0
             end
@@ -125,12 +130,19 @@ function calc_soil_water(;
         end
     end
 
-    # ===== 5. Soil evaporation =====
-    # Eq.57: ψ(z) = ψ_s * (w_s/w_sat)^(-B)
+    # ===== 5. Soil evaporation (calculation mainly on top soil) =====
+    # Eq.57: ψ(z) = ψ_s * (w_s(z)/w_sat)^(-B)
+    # ψ_z is the water potential at deth Z
+    # here the arithmetic operations code with '.', such as './'
+    # is the vectorized version of the formula
     W = layer_water ./ porosity
     ψ = ψ_sat .* W.^(.-B_frac)
 
-    # Eq.30: soil surface resistance r_s
+    # Rsoil: soil surface resistance r_s
+    # 800 is the reference value
+    # when top soil layer is fully dry, W[1] ≈ 0, Rsoil ≈ 800
+    # when top soil layer is fully wet, W[1] ≈ 1, Rsoil ≈ 0, no evaporation
+    # W[2] is the second top soil,  for some small correction maybe
     Rsoil = 800.0 * (1.0 - W[1]) / (0.2 + W[1])              # [s/m]
 
     # Eq.60: topsoil humidity h_ms (Kelvin equation)
@@ -192,6 +204,12 @@ function calc_soil_water(;
     flux_water[n_layer+1] = 0.0
 
     # Build tridiagonal system: A * Δw = b
+    # Taylor Expand
+    # flux(w+Δw) ≈ flux(w) + ∂flux/∂w_i * Δw_i + ∂flux/∂w_(i+1) *Δw_(i+1)
+    # ∂flux/∂w_i * Δw_i + ∂flux/∂w_(i+1) *Δw_(i+1) ≈ flux(w+Δw) - flux(w)
+    # Δw_i & Δw_(i+1) is the Δw
+    # ∂flux/∂w_i & ∂flux/∂w_(i+1) is the A
+    # flux(w+Δw) - flux(w) is the b
     Δflux_water = zeros(Float64, n_layer, 2)
     for i in 1:n_layer-1
         Δflux_water[i, 1] = (-KB[i] / layer_width_ave[i]) * (B_frac * ψ_sat / porosity * (layer_water[i] / porosity)^(-B_frac - 1.0))
