@@ -50,3 +50,5 @@ example/*/output/
 example/*/*/output/
 example/*/output_ref/
 example/*/*/output_ref/
+
+.reasonix/
