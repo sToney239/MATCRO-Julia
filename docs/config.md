@@ -39,7 +39,7 @@ If the file does not exist or the requested year is not found, `co2_ppm_default`
 
 ---
 
-## 2. Simulation: choose `[point_simulation]` **or** `[spatial_simulation]`
+## 2. `[point_simulation]` **or** `[spatial_simulation]`
 
 You must specify exactly one simulation mode. If both are present, `[point_simulation]` takes priority.
 
@@ -119,7 +119,7 @@ Foe this spatial simulation section, the model outputs **one GeoTIFF file per ye
 
 The TIF files use WGS84 (EPSG:4326) coordinate reference system, with geotransform metadata for proper geospatial alignment.
 
-### 2.3.1 Weather: `[spatial_simulation.weather]`
+### 2.2.1 Weather: `[spatial_simulation.weather]`
 
 Dimension name settings for weather NetCDF files:
 
@@ -180,7 +180,7 @@ variable = "wnd"
 height = 10.0
 ```
 
-### 2.3.2 Management: `[spatial_simulation.management]`
+### 2.2.2 Management: `[spatial_simulation.management]`
 
 Management parameters for spatial simulation.
 
@@ -250,7 +250,7 @@ file = "data/tif/soil_type.tif"
 
 > For TIF files, the `variable` key is not needed — the program reads the first band directly.
 
-### 2.3.3 Boundary: `[spatial_simulation.boundary]` (optional)
+### 2.3 Boundary: `[spatial_simulation.boundary]` (optional)
 
 Boundary file for spatial filtering — only pixels within (or contacting) the boundary are simulated.
 
