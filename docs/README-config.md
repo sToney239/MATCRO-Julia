@@ -2,7 +2,7 @@
 
 This document describes all parameters in the MATCRO-Julia configuration file (`config.toml`).
 
-For a quick start guide, see [README.md](..\README.md).
+For a quick start guide, see [README.md](../README.md).
 
 ---
 
