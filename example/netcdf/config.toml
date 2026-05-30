@@ -1,5 +1,5 @@
 # Example: NetCDF spatial simulation (3-year, with management params)
-# Usage: julia src/00_matcro.jl example/netcdf/config.toml
+# Usage: julia matcro.jl example/netcdf/config.toml
 
 [general]
 crop_name = "Maize"

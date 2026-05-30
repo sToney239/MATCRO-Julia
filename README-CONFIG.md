@@ -16,11 +16,15 @@ Core simulation settings that apply to both point and spatial modes.
 | `crop_param` | String | — | — | Path to crop parameter TOML file (relative to config file) |
 | `start_year` | Int | — | year | Simulation start year |
 | `end_year` | Int | — | year | Simulation end year |
-| `start_doy` | Int | 1 | day of year | Simulation start day of year |
-| `end_doy` | Int | 365 | day of year | Simulation end day of year |
+| `start_doy` | Int | 1 | day of year | Simulation start day of year. Must be ≥ 1 and < `end_doy`. |
+| `end_doy` | Int | 365 | day of year | Simulation end day of year. Must be ≥ 1 and > `start_doy`. |
 | `time_step` | Int | 3600 | seconds | Time step per iteration, often for 1 hour which should be 3600s. |
 | `co2_ppm_default` | Float64 | 400.0 | ppm | Default CO₂ concentration. |
 | `co2_yearly_file` | String | "" | — | Path to CO₂ CSV file (relative to config file, or absolute). Takes priority over `co2_ppm_default` |
+
+**`start_doy` / `end_doy` behavior**:
+- **Point mode**: defines the DOY range for the first and last simulation year. Middle years run DOY 1–365.
+- **Spatial mode**: the DOY range is used to select a subset of days from the NetCDF forcing data. If the NetCDF file contains fewer days than `end_doy`, the actual range is clamped to the available data. By default (`start_doy=1`, `end_doy=365`), all days in the NetCDF file are used.
 
 **CO₂ file format**: CSV with header row and two columns:
 
@@ -263,10 +267,10 @@ Spatial simulation uses Julia's built-in multi-threading via `Threads.@threads`.
 
 ```bash
 # Use N threads
-julia -t N src/00_matcro.jl config.toml
+julia -t N matcro.jl config.toml
 
 # Auto-detect available CPU cores
-julia -t auto src/00_matcro.jl config.toml
+julia -t auto matcro.jl config.toml
 ```
 
 Alternatively, set the `JULIA_NUM_THREADS` environment variable before launching Julia.

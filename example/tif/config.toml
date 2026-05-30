@@ -1,5 +1,5 @@
 # Example: GeoTIFF management params + NetCDF forcing spatial simulation (3-year)
-# Usage: julia src/00_matcro.jl example/tif/config.toml
+# Usage: julia matcro.jl example/tif/config.toml
 
 [general]
 crop_name = "Maize"

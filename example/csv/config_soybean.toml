@@ -1,5 +1,5 @@
 # MATCRO CSV Example
-# Usage: julia src/00_matcro.jl example/csv/config.toml
+# Usage: julia matcro.jl example/csv/config_soybean.toml
 
 [general]
 crop_name = "Soybeans"

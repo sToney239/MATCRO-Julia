@@ -1,5 +1,5 @@
 # MATCRO Multi-year CSV Example
-# Usage: julia src/00_matcro.jl example/csv_multi_year/config.toml
+# Usage: julia matcro.jl example/csv_multi_year/config.toml
 
 [general]
 crop_name = "Maize"

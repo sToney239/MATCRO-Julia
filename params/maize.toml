@@ -71,7 +71,7 @@ leaf_weight_decay_rate = 3.0       # SLW shape parameter; Fortran: SLWX
 # ===== Plant height ===== (seems not been used in model)
 # in Fortran comments: HGT = height_coeff_a1 * LAI^height_coeff_b1 before heading
 # in Fortran comments: HGT = height_coeff_a2 * LAI^height_coeff_b2 after heading
-height_coeff_a1 = 2.0              # Fortran: HGTAA
+height_coeff_a1 = 2.0              # Fortran: HGTAA, possibly should be max crop height in model
 height_coeff_a2 = 0.6753014        # Fortran: HGTAB
 height_coeff_b1 = 0.3664009        # Fortran: HGTBA
 height_coeff_b2 = 0.3175134        # Fortran: HGTBB

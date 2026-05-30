@@ -11,9 +11,9 @@ using TOML
     # Time
     start_year::Int
     end_year::Int
-    start_doy::Int
-    end_doy::Int
     time_step::Int             # Δt [seconds] (Fortran: TRES)
+    start_doy::Int = 1
+    end_doy::Int = 365
 
     # Location (single point)
     latitude::Float64          # [degree]
@@ -355,11 +355,24 @@ function read_config(config_path::String)::Config
         co2_file_val = joinpath(config_dir, co2_file_val)
     end
 
+    # Validate start_doy / end_doy
+    start_doy_val = get(gen, "start_doy", 1)
+    end_doy_val = get(gen, "end_doy", 365)
+    if start_doy_val < 1
+        error("start_doy must be >= 1, got $start_doy_val")
+    end
+    if end_doy_val < 1
+        error("end_doy must be >= 1, got $end_doy_val")
+    end
+    if start_doy_val >= end_doy_val
+        error("start_doy ($start_doy_val) must be < end_doy ($end_doy_val)")
+    end
+
     return Config(;
         start_year        = gen["start_year"],
         end_year          = gen["end_year"],
-        start_doy         = get(gen, "start_doy", 1),
-        end_doy           = get(gen, "end_doy", 365),
+        start_doy         = start_doy_val,
+        end_doy           = end_doy_val,
         time_step         = get(gen, "time_step", 3600),
         latitude          = latitude,
         crop_name         = gen["crop_name"],
@@ -458,12 +471,12 @@ function read_crop_params(toml_path::String)::CropParameters
         k_leaf_loss              = crop_params["k_leaf_loss"],
         planting_offset          = crop_params["planting_offset"],
         bulk_transfer_coeff      = get(crop_params, "bulk_transfer_coeff", 0.06),
-        ZKCA                     = get(crop_params, "ZKCA", 404.9),
-        ZKCB                     = get(crop_params, "ZKCB", 79430.0),
-        ZKOA                     = get(crop_params, "ZKOA", 278.4),
-        ZKOB                     = get(crop_params, "ZKOB", 36380.0),
-        GMMA                     = get(crop_params, "GMMA", 42.8),
-        GMMB                     = get(crop_params, "GMMB", 37830.0),
+        # ZKCA                     = get(crop_params, "ZKCA", 404.9),
+        # ZKCB                     = get(crop_params, "ZKCB", 79430.0),
+        # ZKOA                     = get(crop_params, "ZKOA", 278.4),
+        # ZKOB                     = get(crop_params, "ZKOB", 36380.0),
+        # GMMA                     = get(crop_params, "GMMA", 42.8),
+        # GMMB                     = get(crop_params, "GMMB", 37830.0),
     )
 end
 

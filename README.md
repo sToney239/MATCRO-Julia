@@ -43,14 +43,14 @@ Pkg.add("ArchGDAL")
 ## Quick start
 
 ```bash
-julia src/00_matcro.jl <config_path>
+julia matcro.jl <config_path>
 ```
 
-This command consists of three parts separated by spaces: the `julia` interpreter, the main program script `src/00_matcro.jl`, and the path to a `.toml` configuration file.
+This command consists of three parts separated by spaces: the `julia` interpreter, the main program script `matcro.jl`, and the path to a `.toml` configuration file.
 
 - `<config_path>` can be any `.toml` file, located anywhere on your system — no need to place it in the project root
 - All relative paths in the `.toml` file (e.g., `crop_param`, `file`) are resolved relative to the config file's own directory
-- The model source code lives in the `src/` directory, with `00_matcro.jl` as the main entry point. The `.toml` file is a configuration file that Julia can read — you are free to modify its contents. For detailed parameter descriptions, see the example configs in `example/` and the [README-CONFIG.md](README-CONFIG.md) reference.
+- The model source code lives in the `lib/` directory, with `matcro.jl` as the main entry point. The `.toml` file is a configuration file that Julia can read — you are free to modify its contents. For detailed parameter descriptions, see the example configs in `example/` and the [README-CONFIG.md](README-CONFIG.md) reference.
 
 For full configuration `toml` reference, see [README-CONFIG.md](README-CONFIG.md).
 
@@ -60,17 +60,17 @@ The project includes ready-to-run example datasets. Try the following commands:
 
 ```bash
 # Point simulation with single year CSV data
-julia src/00_matcro.jl example/csv/config.toml
+julia matcro.jl example/csv/config.toml
 
 # Point simulation with multi-year CSV data
-julia src/00_matcro.jl example/csv_multi_year/config.toml
+julia matcro.jl example/csv_multi_year/config.toml
 
 # Spatial simulation with NetCDF weather data and NetCDF management data
-julia src/00_matcro.jl example/netcdf/config.toml
+julia matcro.jl example/netcdf/config.toml
 
 # Spatial simulation with NetCDF weather data and TIF management data
 # with boundary filter
-julia src/00_matcro.jl example/tif/config.toml
+julia matcro.jl example/tif/config.toml
 ```
 
 ### Multi-threaded parallel simulation
@@ -85,7 +85,7 @@ The thread count is controlled by the Julia runtime, **not** by the config file.
 
 ```bash
 # Use 4 threads
-julia -t 4 src/00_matcro.jl example/tif/config.toml
+julia -t 4 matcro.jl example/tif/config.toml
 ```
 
 You can also set the `JULIA_NUM_THREADS` environment variable instead of the `-t` flag.
