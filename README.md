@@ -110,6 +110,8 @@ You can also set the `JULIA_NUM_THREADS` environment variable instead of the `-t
 
 ## Configuration Structure
 
+> For full details, see [README-CONFIG.md](docs\README-CONFIG.md).
+
 The config TOML file has two main sections:
 
 ### 1. `[general]`
@@ -171,4 +173,3 @@ default_value = 120
 # ... other management params (with optional spatial files) ...
 ```
 
-For full details, see [README-CONFIG.md](README-CONFIG.md).
