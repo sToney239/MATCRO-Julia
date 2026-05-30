@@ -112,21 +112,24 @@ You can also set the `JULIA_NUM_THREADS` environment variable instead of the `-t
 
 The config TOML file has two main sections:
 
-### `[general]`
+### 1. `[general]`
 
 Core simulation settings that apply to both point and raster modes:
 
-| Parameter | Description |
-|-----------|-------------|
-| `crop_name` | Crop type: `"Maize"`, `"Rice"`, `"Wheat"`, `"Soybeans"` |
-| `crop_param` | Path to crop parameter TOML file |
-| `start_year` / `end_year` | Simulation year range |
-| `start_doy` / `end_doy` | Simulation day-of-year range |
-| `time_step` | Time step in seconds (typically use 1 hour, which is 3600s) |
-| `co2_ppm_default` | Default CO₂ concentration [ppm] |
-| `co2_yearly_file` | Path to yearly CO₂ CSV file (optional) |
+```toml
+[general]
+crop_name = "Maize"        # Maize, Rice, Wheat, Soybean
+crop_param = "params/maize.toml"
+start_year = 2000
+end_year = 2000
+start_doy = 1
+end_doy = 365
+time_step = 3600           # how many seconds in 1 step, normal should be 1 hour [seconds]
+co2_ppm_default = 400.0    # default CO2 concentration [ppm]
+co2_yearly_file = "data/co2/co2.csv" 
+```
 
-### Input: choose `[point_simulation]` **or** `[spatial_simulation]`
+### 2. `[point_simulation]` **or** `[spatial_simulation]`
 
 #### Point mode — `[point_simulation]`
 
@@ -168,114 +171,4 @@ default_value = 120
 # ... other management params (with optional spatial files) ...
 ```
 
-## Input Data Format
-
-### 1. Point Data Format (CSV)
-
-When running point simulation, the weather data should be CSV format (specified by `csv_path` in `[point_simulation.weather]`). Your CSV file must have the following columns:
-
-| Column | Unit | Description |
-|--------|------|-------------|
-| year | — | Year |
-| doy | — | Day of year (1–366) |
-| tmax | K | Daily maximum temperature |
-| tmin | K | Daily minimum temperature |
-| radiation | W/m² | Downward shortwave radiation |
-| precip | kg/m²/s | Precipitation rate |
-| humidity | kg/kg | Specific humidity |
-| wind | m/s | Wind speed |
-| pressure | Pa | Surface air pressure |
-| ozone | — | Ozone concentration (can be 0) |
-
-The file must include a header row with these column names.
-
-Management parameters are specified in `[point_simulation.management]`.
-
-### 2. Raster Input Data Format (NetCDF & TIFF)
-
-When using NetCDF or TIFF input (`[spatial_simulation]` in config.toml), your data files must follow these format requirements.
-
-
-#### 2.1 Weather variables (NetCDF format required)
-
-##### 2.1.1 Spatial dimensions
-
-Dimension names are configurable via `lon_dim`, `lat_dim`, `time_dim` in `[spatial_simulation.weather]` (defaults: `lon`, `lat`, `time`). Common alternatives like `latitude`, `longitude` are also auto-detected as fallbacks.
-
-##### 2.1.2 Time dimension
-
-The time variable in your NetCDF file must follow one of these formats:
-
-1. **Stored as dates**: time values are directly stored as calendar dates (e.g., `2021-01-01`, `2021-01-02`, ...)
-2. **Stored as numbers with a `units` attribute**: numeric values (e.g., 0, 1, 2, ...) with a `units` attribute following the format `"days since YYYY-MM-DD"` (e.g., `"days since 2021-01-01"`). The program converts each number to a date using the reference date in `units`, then slices by year.
-
-> If the `units` attribute is missing or not in the `"days since YYYY-MM-DD"` format, the program will report an error.
-
-##### 2.1.3 Weather Variable dimension
-
-Each meteorological variable is specified in `[spatial_simulation.weather.<name>]` with user-friendly names:
-
-| Config key | Variable | Description |
-|------------|----------|-------------|
-| `temperature_max` | tmx | Daily maximum temperature |
-| `temperature_min` | tmn | Daily minimum temperature |
-| `precipitation` | prc | Precipitation rate |
-| `radiation` | rsd | Downward shortwave radiation |
-| `humidity` | shm | Specific humidity |
-| `wind_speed` | wnd | Wind speed |
-| `pressure` | prs | Surface air pressure |
-
-Each weather variable section requires:
-- `file`: path to the NetCDF file (relative to config file location, or absolute)
-- `variable`: variable name inside the file
-
-Optional keys:
-- `height`: wind measurement height (default: 10.0 m), only for `wind_speed`
-- `scale_factor`: scaling factor for data values
-- `add_offset`: offset added to data values
-
-#### 2.2 Management parameters (NetCDF or TIF format)
-
-> Belows describes only the TIF format requirement, if you choose NetCDF file, the format should be like in 2.2
-
-Management parameters are specified in `[spatial_simulation.management.<param_name>]` sections:
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `planting_doy` | Planting day of year | 120 |
-| `is_irrigated` | 0 = rainfed, 1 = irrigated | 0 |
-| `soil_type` | Soil texture index (1-13) | 9 |
-| `n_fertilizer` | Nitrogen fertilizer [kg N/ha] | 100.0 |
-| `thermal_time_requirement` | GDH at maturity | 1500.0 |
-
-Each parameter section supports:
-1. **Uniform default only**: set `default_value` — used for all pixels when no file is provided.
-2. **Spatial NC file**: add `file` and `variable` keys alongside `default_value`. The file can be 2D (lon, lat) for static parameters, or 3D (lon, lat, time) with a year dimension for time-varying parameters.
-3. **Spatial TIF file**: add `file` key with a `.tif`/`.tiff` path alongside `default_value`. The TIF file should be single-band (static, used for all years). Nearest-neighbor resampling is used when TIF and NC grid resolutions differ. A bbox check is performed to ensure the TIF extent covers the simulation grid.
-
-Priority: file (NC or TIF) > `default_value` > built-in default.
-
-#### 2.3 Boundary filtering (optional)
-
-Specify a GeoJSON boundary file to filter pixels:
-
-```toml
-[spatial_simulation.boundary]
-file = "data/boundaries/region.geojson"
-buffer_deg = 0.01    # buffer distance (degrees) for boundary contact detection
-```
-
->Later `shp` and `TIF` mask will be supported.
-
 For full details, see [README-CONFIG.md](README-CONFIG.md).
-
-### Spatial Output Format
-
-When running raster spatial simulation with `format = "raster"` (or `"geotiff"`), the model outputs **one GeoTIFF file per year**. Four files are generated for each simulation year:
-
-- `yield_YYYY.tif`: Crop yield (kg/ha), Float64
-- `harvest_doy_YYYY.tif`: Harvest day of year, Int32
-- `LAI_max_YYYY.tif`: Seasonal maximum leaf area index (m²/m²), Float64
-- `biomass_aboveground_YYYY.tif`: Aboveground biomass at harvest (kg/ha), Float64
-
-The TIF files use WGS84 (EPSG:4326) coordinate reference system, with geotransform metadata for proper geospatial alignment.

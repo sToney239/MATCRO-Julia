@@ -6,7 +6,7 @@ For a quick start guide, see [README.md](README.md).
 
 ---
 
-## `[general]`
+## 1. `[general]`
 
 Core simulation settings that apply to both point and spatial modes.
 
@@ -39,15 +39,17 @@ If the file does not exist or the requested year is not found, `co2_ppm_default`
 
 ---
 
-## Simulation: choose `[point_simulation]` **or** `[spatial_simulation]`
+## 2. Simulation: choose `[point_simulation]` **or** `[spatial_simulation]`
 
 You must specify exactly one simulation mode. If both are present, `[point_simulation]` takes priority.
 
 ---
 
-## `[point_simulation]`
+## 2.1 `[point_simulation]`
 
 Point simulation mode with CSV weather data.
+
+### Global settings
 
 | Parameter | Type | Default | Unit | Description |
 |-----------|------|---------|------|-------------|
@@ -98,7 +100,7 @@ Output: CSV files (`yield_summary.csv`, `daily_output.csv`) in `output_directory
 
 ---
 
-## `[spatial_simulation]`
+## 2.2 `[spatial_simulation]`
 
 Spatial simulation mode with NetCDF/TIFF data.
 
@@ -108,7 +110,16 @@ Spatial simulation mode with NetCDF/TIFF data.
 |-----------|------|---------|-------------|
 | `output_directory` | String | "output/" | Output directory path (relative to config file, or absolute) |
 
-### Weather: `[spatial_simulation.weather]`
+Foe this spatial simulation section, the model outputs **one GeoTIFF file per year**. Four files are generated for each simulation year:
+
+- `yield_YYYY.tif`: Crop yield (kg/ha), Float64
+- `harvest_doy_YYYY.tif`: Harvest day of year, Int32
+- `LAI_max_YYYY.tif`: Seasonal maximum leaf area index (m²/m²), Float64
+- `biomass_aboveground_YYYY.tif`: Aboveground biomass at harvest (kg/ha), Float64
+
+The TIF files use WGS84 (EPSG:4326) coordinate reference system, with geotransform metadata for proper geospatial alignment.
+
+### 2.3.1 Weather: `[spatial_simulation.weather]`
 
 Dimension name settings for weather NetCDF files:
 
@@ -117,6 +128,15 @@ Dimension name settings for weather NetCDF files:
 | `lon_dim` | String | `"lon"` | Longitude dimension name in NetCDF files |
 | `lat_dim` | String | `"lat"` | Latitude dimension name in NetCDF files |
 | `time_dim` | String | `"time"` | Time dimension name in NetCDF files |
+
+Dimension names are configurable via `lon_dim`, `lat_dim`, `time_dim` in `[spatial_simulation.weather]` (defaults: `lon`, `lat`, `time`). Common alternatives like `latitude`, `longitude` are also auto-detected as fallbacks.
+
+The time variable in your NetCDF file must follow one of these formats:
+
+1. **Stored as dates**: time values are directly stored as calendar dates (e.g., `2021-01-01`, `2021-01-02`, ...)
+2. **Stored as numbers with a `units` attribute**: numeric values (e.g., 0, 1, 2, ...) with a `units` attribute following the format `"days since YYYY-MM-DD"` (e.g., `"days since 2021-01-01"`). The program converts each number to a date using the reference date in `units`, then slices by year.
+
+> If the `units` attribute is missing or not in the `"days since YYYY-MM-DD"` format, the program will report an error.
 
 #### Per-variable specification: `[spatial_simulation.weather.<var>]`
 
@@ -160,7 +180,7 @@ variable = "wnd"
 height = 10.0
 ```
 
-### Management: `[spatial_simulation.management]`
+### 2.3.2 Management: `[spatial_simulation.management]`
 
 Management parameters for spatial simulation.
 
@@ -230,7 +250,7 @@ file = "data/tif/soil_type.tif"
 
 > For TIF files, the `variable` key is not needed — the program reads the first band directly.
 
-### Boundary: `[spatial_simulation.boundary]` (optional)
+### 2.3.3 Boundary: `[spatial_simulation.boundary]` (optional)
 
 Boundary file for spatial filtering — only pixels within (or contacting) the boundary are simulated.
 
@@ -257,22 +277,3 @@ Output: GeoTIFF files per year in `output_directory`:
 
 All files use WGS84 (EPSG:4326) CRS with proper geotransform metadata.
 
----
-
-## Multi-threading
-
-Spatial simulation uses Julia's built-in multi-threading via `Threads.@threads`. The thread count is controlled by the **Julia runtime**, not by the config file.
-
-**How to enable multi-threading:**
-
-```bash
-# Use N threads
-julia -t N matcro.jl config.toml
-
-# Auto-detect available CPU cores
-julia -t auto matcro.jl config.toml
-```
-
-Alternatively, set the `JULIA_NUM_THREADS` environment variable before launching Julia.
-
-**Recommendation**: Use physical cores minus 1 or 2, leaving headroom for your system. For example, on a 16-core machine, use 14 threads (`julia -t 14`).
