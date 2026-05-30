@@ -26,19 +26,29 @@ This is the Julia version of the MATCRO crop model, originally written in Fortra
 
 ### Install Julia
 
-Download Julia from [julialang.org](https://julialang.org/downloads/) (1.9 or later). Follow the platform-specific instructions for Windows, macOS, or Linux.
+Download Julia from [julialang.org](https://julialang.org/downloads/) (1.10 or later). Follow the platform-specific instructions for Windows, macOS, or Linux.
 
 ### Install dependencies
 
-`NCDatasets` and `ArchGDAL` are the external packages you need to install (Other packages required are Julia standard libraries):
+All external packages are listed in `Project.toml`. Install them at once:
 
 ```julia
 using Pkg
-Pkg.add("NCDatasets")
-Pkg.add("ArchGDAL")
+Pkg.activate(".")   # activate the project environment
+Pkg.instantiate()   # install all dependencies from Project.toml
 ```
 
-> If you only use point (CSV) input mode, `NCDatasets` and `ArchGDAL` are not required.
+Or install individually:
+
+| Package | Required for |
+|---------|-------------|
+| `CSV` | Point (CSV) mode |
+| `DataFrames` | Point (CSV) mode |
+| `NCDatasets` | Spatial (NetCDF) mode |
+| `ArchGDAL` | Spatial (GeoTIFF output, TIF input) |
+| `JSON` | Spatial (GeoJSON boundary) |
+
+> If you only use point (CSV) input mode, `NCDatasets`, `ArchGDAL`, and `JSON` are not required. If you only use spatial mode, `CSV` and `DataFrames` are not required. However, using `Pkg.instantiate()` with the project environment will install all packages cleanly and is recommended.
 
 ## Quick start
 
@@ -110,10 +120,10 @@ Core simulation settings that apply to both point and raster modes:
 |-----------|-------------|
 | `crop_name` | Crop type: `"Maize"`, `"Rice"`, `"Wheat"`, `"Soybeans"` |
 | `crop_param` | Path to crop parameter TOML file |
-| `start_year` / `end_year` | Simulation period |
-| `start_doy` / `end_doy` | Day-of-year range |
-| `time_step` | Time step in seconds (typically 3600) |
-| `co2_ppm_default` | Fallback CO₂ concentration [ppm] |
+| `start_year` / `end_year` | Simulation year range |
+| `start_doy` / `end_doy` | Simulation day-of-year range |
+| `time_step` | Time step in seconds (typically use 1 hour, which is 3600s) |
+| `co2_ppm_default` | Default CO₂ concentration [ppm] |
 | `co2_yearly_file` | Path to yearly CO₂ CSV file (optional) |
 
 ### Input: choose `[point_simulation]` **or** `[spatial_simulation]`

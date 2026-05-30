@@ -435,9 +435,9 @@ function run_spatial_simulation(config::Config)
             v_harvest = harvest_doy_3d[:, :, i_year][valid_mask]
             v_lai = LAI_max_3d[:, :, i_year][valid_mask]
             v_biomass = biomass_aboveground_3d[:, :, i_year][valid_mask]
-            @printf("    Average Yield=%.2f kg/ha, Average Harvest DOY=%.1f\n",
+            @printf("    Average Yield: %.2f kg/ha, Average Harvest DOY: %.1f\n",
                     sum(v_yield)/length(v_yield), sum(v_harvest)/length(v_harvest))
-            @printf("    Average Aboveground Biomass=%.2f kg/ha, Average Max LAI=%.2f\n",
+            @printf("    Average Aboveground Biomass: %.2f kg/ha, Average Max LAI: %.2f\n",
                     sum(v_biomass)/length(v_biomass),sum(v_lai)/length(v_lai))
         end
     end
