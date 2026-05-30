@@ -60,9 +60,7 @@ This command consists of three parts separated by spaces: the `julia` interprete
 
 - `<config_path>` can be any `.toml` file, located anywhere on your system — no need to place it in the project root
 - All relative paths in the `.toml` file (e.g., `crop_param`, `file`) are resolved relative to the config file's own directory
-- The model source code lives in the `lib/` directory, with `matcro.jl` as the main entry point. The `.toml` file is a configuration file that Julia can read — you are free to modify its contents. For detailed parameter descriptions, see the example configs in `example/` and the [README-CONFIG.md](README-CONFIG.md) reference.
-
-For full configuration `toml` reference, see [README-CONFIG.md](README-CONFIG.md).
+- The model source code lives in the `lib/` directory, with `matcro.jl` as the main entry point. The `.toml` file is a configuration file that Julia can read — you are free to modify its contents. For detailed parameter descriptions, see the example configs in `example/`. For full configuration `toml` reference, see [config](./docs/config.md) documentation.
 
 ### Try it out
 
@@ -110,7 +108,7 @@ You can also set the `JULIA_NUM_THREADS` environment variable instead of the `-t
 
 ## Configuration Structure
 
-> For full details, see [README-CONFIG.md](./docs/README-CONFIG.md).
+> For full details, see [config](./docs/config.md) documentation.
 
 The config TOML file has two main sections:
 
