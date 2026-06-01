@@ -569,10 +569,19 @@ end
 # Returns Vector of polygons, each polygon is Vector of (lon, lat) tuples
 # CRS is automatically converted to WGS84 (EPSG:4326) if needed
 # ============================================================
-# load_boundary — load boundary polygon from GeoJSON file
-# Returns Vector of polygons, each polygon is Vector of (lon, lat) tuples
-# ============================================================
 function load_boundary(filepath::String)::Vector{Vector{Tuple{Float64,Float64}}}
+    ext = lowercase(splitext(filepath)[2])
+
+    if ext == ".geojson" || ext == ".json"
+        return _load_boundary_geojson(filepath)
+    elseif ext == ".shp"
+        return _load_boundary_shp(filepath)
+    else
+        error("Unsupported boundary file format: $ext (expected .geojson, .json, or .shp)")
+    end
+end
+
+function _load_boundary_geojson(filepath::String)::Vector{Vector{Tuple{Float64,Float64}}}
     polygons = Vector{Vector{Tuple{Float64,Float64}}}()
 
     # Read and parse GeoJSON manually (more reliable than GDAL for simple GeoJSON)
@@ -600,6 +609,42 @@ function load_boundary(filepath::String)::Vector{Vector{Tuple{Float64,Float64}}}
                 ring = poly_coords[1]  # outer ring
                 polygon = [(c[1], c[2]) for c in ring]
                 push!(polygons, polygon)
+            end
+        end
+    end
+
+    return polygons
+end
+
+function _load_boundary_shp(filepath::String)::Vector{Vector{Tuple{Float64,Float64}}}
+    polygons = Vector{Vector{Tuple{Float64,Float64}}}()
+
+    AG.read(filepath) do dataset
+        n_layers = AG.nlayer(dataset)
+        for layer_idx in 1:n_layers
+            layer = AG.getlayer(dataset, layer_idx - 1)
+            for feature in layer
+                geom = AG.getgeom(feature)
+                if geom === nothing
+                    continue
+                end
+
+                geom_type = AG.getgeomtype(geom)
+                if geom_type == AG.wkbPolygon
+                    ring = AG.getgeom(geom, 0)
+                    n_pts = AG.ngeom(ring)
+                    polygon = [(AG.getx(ring, i), AG.gety(ring, i)) for i in 0:(n_pts - 1)]
+                    push!(polygons, polygon)
+                elseif geom_type == AG.wkbMultiPolygon
+                    n_geoms = AG.ngeom(geom)
+                    for i in 0:(n_geoms - 1)
+                        poly_geom = AG.getgeom(geom, i)
+                        ring = AG.getgeom(poly_geom, 0)
+                        n_pts = AG.ngeom(ring)
+                        polygon = [(AG.getx(ring, j), AG.gety(ring, j)) for j in 0:(n_pts - 1)]
+                        push!(polygons, polygon)
+                    end
+                end
             end
         end
     end
@@ -688,10 +733,26 @@ end
 
 # ============================================================
 # create_boundary_mask — create boolean mask for pixels within/contacting boundary
-# Returns n_lon x n_lat matrix: true = pixel is within/contacting boundary
+# Supports GeoJSON (.geojson/.json), Shapefile (.shp), and GeoTIFF (.tif/.tiff).
+# For vector files (geojson/shp): Returns n_lon x n_lat matrix: true = pixel is
+# within/contacting boundary (or buffer). For GeoTIFF: assumes a single-band 0-1
+# mask where 1 means "inside"; pixels with value != 1 are masked out.
 # ============================================================
 function create_boundary_mask(lons::Vector{Float64}, lats::Vector{Float64},
                               boundary_file::String; buffer_deg::Float64=0.0)::Matrix{Bool}
+    ext = lowercase(splitext(boundary_file)[2])
+
+    if ext == ".tif" || ext == ".tiff"
+        return _create_boundary_mask_tif(lons, lats, boundary_file)
+    elseif ext == ".geojson" || ext == ".json" || ext == ".shp"
+        return _create_boundary_mask_vector(lons, lats, boundary_file; buffer_deg=buffer_deg)
+    else
+        error("Unsupported boundary file format: $ext (expected .geojson, .json, .shp, .tif, or .tiff)")
+    end
+end
+
+function _create_boundary_mask_vector(lons::Vector{Float64}, lats::Vector{Float64},
+                                       boundary_file::String; buffer_deg::Float64=0.0)::Matrix{Bool}
     n_lon = length(lons)
     n_lat = length(lats)
 
@@ -731,4 +792,35 @@ function create_boundary_mask(lons::Vector{Float64}, lats::Vector{Float64},
     end
 
     return mask
+end
+
+function _create_boundary_mask_tif(lons::Vector{Float64}, lats::Vector{Float64},
+                                   tif_path::String)::Matrix{Bool}
+    n_lon = length(lons)
+    n_lat = length(lats)
+
+    AG.read(tif_path) do dataset
+        band = AG.getband(dataset, 1)
+        tif_data = Float64.(AG.read(band))
+        tif_width = AG.width(dataset)
+        tif_height = AG.height(dataset)
+        gt = AG.getgeotransform(dataset)
+        x_origin = gt[1]; pixel_w = gt[2]
+        y_origin = gt[4]; pixel_h = gt[6]
+
+        mask = fill(false, n_lon, n_lat)
+
+        for i_lon in 1:n_lon, i_lat in 1:n_lat
+            col = round(Int, (lons[i_lon] - x_origin) / pixel_w + 0.5)
+            row = round(Int, (lats[i_lat] - y_origin) / pixel_h + 0.5)
+            if 1 <= col <= tif_width && 1 <= row <= tif_height
+                # tif_data is [col, row] = [lon, lat]
+                mask[i_lon, i_lat] = (tif_data[col, row] == 1.0)
+            else
+                mask[i_lon, i_lat] = false
+            end
+        end
+
+        return mask
+    end
 end
