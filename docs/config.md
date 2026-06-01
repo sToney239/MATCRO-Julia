@@ -256,7 +256,7 @@ Boundary file for spatial filtering — only pixels within (or contacting) the b
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `file` | String | — | Path to boundary file (GeoJSON `.geojson`) |
+| `file` | String | — | Path to boundary file (GeoJSON `.geojson`, ESRI shapefile `.shp` or TIFF `.tif`) |
 | `buffer_deg` | Float64 | 0.0 | Buffer distance (in degrees) for contact detection. Pixels within this distance of the boundary are also included. Default 0 means strict inside-polygon check. |
 
 **Example**:
