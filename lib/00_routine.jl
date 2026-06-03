@@ -370,16 +370,87 @@ function run_spatial_simulation(config::Config)
 
     # Spatial chunking: split by longitude to reduce memory bandwidth contention
     # Each chunk processes a subset of longitude, reducing concurrent memory access
+    # Strategy: allocate chunks so each has roughly equal valid pixels (after boundary mask),
+    #          and try to make chunk sizes multiples of thread count for better load balancing
     n_chunks = config.n_chunks
     d_lon = length(lons) > 1 ? lons[2] - lons[1] : 1.0
     if n_chunks > 1
-        chunk_size = ceil(Int, n_lon / n_chunks)
-        lon_chunks = [(i*chunk_size+1, min((i+1)*chunk_size, n_lon)) for i in 0:(n_chunks-1)]
-        println("    Spatial chunking: $n_chunks chunks (~$(round(chunk_size * d_lon, digits=1))° longitude per chunk)")
+        # Count valid pixels per longitude column
+        pixels_per_lon = Vector{Int}(undef, n_lon)
+        if boundary_mask !== nothing
+            for i_lon in 1:n_lon
+                pixels_per_lon[i_lon] = sum(boundary_mask[i_lon, :])
+            end
+        else
+            pixels_per_lon .= n_lat
+        end
+
+        # Compute cumulative pixel counts
+        cumulative_pixels = cumsum(pixels_per_lon)
+        total_pixels = cumulative_pixels[end]
+
+        # Target pixels per chunk (roughly equal)
+        target_per_chunk = total_pixels / n_chunks
+        n_threads = Threads.nthreads()
+
+        # Allocate chunks based on pixel counts
+        lon_chunks = Vector{Tuple{Int,Int}}(undef, n_chunks)
+        current_lon = 1
+        for chunk_idx in 1:n_chunks
+            # Find end of this chunk: aim for target_per_chunk pixels
+            target_pixels = chunk_idx * target_per_chunk
+            lon_end = findlast(c -> c <= target_pixels, cumulative_pixels)
+            lon_end = lon_end === nothing ? n_lon : lon_end[1]
+
+            # Ensure at least one column
+            lon_end = max(lon_end, current_lon)
+
+            # Adjust to be closer to multiple of thread count for better load balancing
+            # (except for the last chunk which can be irregular)
+            if chunk_idx < n_chunks
+                chunk_pixels = cumulative_pixels[lon_end] - (current_lon > 1 ? cumulative_pixels[current_lon-1] : 0)
+                # Round up to nearest multiple of thread count
+                remainder = mod(chunk_pixels, n_threads)
+                if remainder > 0 && lon_end < n_lon
+                    adjust = n_threads - remainder
+                    new_end = lon_end
+                    # Try to extend to next multiple of thread count if we have enough pixels ahead
+                    for test_lon in (lon_end+1):n_lon
+                        test_pixels = cumulative_pixels[test_lon] - (current_lon > 1 ? cumulative_pixels[current_lon-1] : 0)
+                        if test_pixels - chunk_pixels <= adjust
+                            new_end = test_lon
+                        else
+                            break
+                        end
+                    end
+                    lon_end = new_end
+                end
+            end
+
+            lon_chunks[chunk_idx] = (current_lon, lon_end)
+            current_lon = lon_end + 1
+
+            # Ensure we don't exceed bounds
+            if current_lon > n_lon
+                break
+            end
+        end
+
+        # Print chunk info
+        chunk_ranges = ["$(lons[c[1]])° ~ $(lons[c[2]])°" for c in lon_chunks]
+        chunk_pixels = [sum(pixels_per_lon[c[1]:c[2]]) for c in lon_chunks]
+        println("    Spatial chunking: $n_chunks chunks (target ~$(round(Int, target_per_chunk)) pixels each, $n_threads threads)")
+        for i in 1:min(n_chunks, 4)
+            println("      Chunk $i: lon $(chunk_ranges[i]) ($(chunk_pixels[i]) pixels)")
+        end
+        if n_chunks > 4
+            println("      ... and $(n_chunks-4) more chunks")
+        end
     end
 
     for (i_year, year) in enumerate(years)
         println("\n  Year $year ...")
+        year_start_time = time()
         co2_ppm = read_co2(config, year)
 
         # Read spatial forcing (full year)
@@ -403,37 +474,52 @@ function run_spatial_simulation(config::Config)
             for (chunk_idx, (lon_start, lon_end)) in enumerate(lon_chunks)
                 # Build indices for this chunk only
                 chunk_indices = [(i_lon, i_lat) for i_lon in lon_start:lon_end for i_lat in 1:n_lat]
-                results = Vector{NamedTuple}(undef, length(chunk_indices))
+                chunk_pixels_count = length(chunk_indices)
+                n_threads = Threads.nthreads()
 
-                Threads.@threads for index in eachindex(chunk_indices)
-                    i_lon, i_lat = chunk_indices[index]
-                    # Skip pixels outside boundary
-                    if boundary_mask !== nothing && !boundary_mask[i_lon, i_lat]
-                        results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
-                        continue
+                # Pre-allocate results and track valid pixel indices
+                results = Vector{NamedTuple}(undef, chunk_pixels_count)
+                valid_indices = Vector{Int}()
+                for (idx, (i_lon, i_lat)) in enumerate(chunk_indices)
+                    if boundary_mask === nothing || boundary_mask[i_lon, i_lat]
+                        push!(valid_indices, idx)
+                    else
+                        results[idx] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
                     end
-                    lat = lats[i_lat]
-                    lon = lons[i_lon]
+                end
 
-                    # Build per-pixel management params
-                    pixel_mgmt = ManagementParams(
-                        Int(planting_doy_field[i_lon, i_lat]),
-                        Int(is_irrigated_field[i_lon, i_lat]),
-                        Int(soil_type_field[i_lon, i_lat]),
-                        Float64(n_fertilizer_field[i_lon, i_lat]),
-                        Float64(thermal_time_field[i_lon, i_lat]),
-                        params.height_coeff_a1,
-                        get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]  # wind_height from config
-                    )
+                # Process valid pixels with load-balanced distribution
+                n_valid = length(valid_indices)
+                if n_valid > 0
+                    # Distribute valid pixels round-robin across threads for better load balancing
+                    Threads.@threads for t in 1:n_threads
+                        # Each thread processes every n_threads-th valid pixel (starting at different offset)
+                        for local_idx in t:n_threads:n_valid
+                            global_idx = valid_indices[local_idx]
+                            i_lon, i_lat = chunk_indices[global_idx]
+                            lat = lats[i_lat]
+                            lon = lons[i_lon]
 
-                    try
-                        results[index] = run_pixel_spatial(
-                            config, params, year, lat, lon,
-                            spatial_forcing, n_days, co2_ppm,
-                            pixel_mgmt;
-                            i_lon=i_lon, i_lat=i_lat)
-                    catch
-                        results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                            pixel_mgmt = ManagementParams(
+                                Int(planting_doy_field[i_lon, i_lat]),
+                                Int(is_irrigated_field[i_lon, i_lat]),
+                                Int(soil_type_field[i_lon, i_lat]),
+                                Float64(n_fertilizer_field[i_lon, i_lat]),
+                                Float64(thermal_time_field[i_lon, i_lat]),
+                                params.height_coeff_a1,
+                                get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]
+                            )
+
+                            try
+                                results[global_idx] = run_pixel_spatial(
+                                    config, params, year, lat, lon,
+                                    spatial_forcing, n_days, co2_ppm,
+                                    pixel_mgmt;
+                                    i_lon=i_lon, i_lat=i_lat)
+                            catch
+                                results[global_idx] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                            end
+                        end
                     end
                 end
 
@@ -449,37 +535,48 @@ function run_spatial_simulation(config::Config)
         else
             # No chunking: process all pixels at once
             indices = [(i_lon, i_lat) for i_lon in 1:n_lon for i_lat in 1:n_lat]
+            n_threads = Threads.nthreads()
+
+            # Separate valid and masked-out pixels
             results = Vector{NamedTuple}(undef, length(indices))
-
-            Threads.@threads for index in eachindex(indices)
-                i_lon, i_lat = indices[index]
-                # Skip pixels outside boundary
-                if boundary_mask !== nothing && !boundary_mask[i_lon, i_lat]
-                    results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
-                    continue
+            valid_indices = Vector{Int}()
+            for (idx, (i_lon, i_lat)) in enumerate(indices)
+                if boundary_mask === nothing || boundary_mask[i_lon, i_lat]
+                    push!(valid_indices, idx)
+                else
+                    results[idx] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
                 end
-                lat = lats[i_lat]
-                lon = lons[i_lon]
+            end
 
-                # Build per-pixel management params
-                pixel_mgmt = ManagementParams(
-                    Int(planting_doy_field[i_lon, i_lat]),
-                    Int(is_irrigated_field[i_lon, i_lat]),
-                    Int(soil_type_field[i_lon, i_lat]),
-                    Float64(n_fertilizer_field[i_lon, i_lat]),
-                    Float64(thermal_time_field[i_lon, i_lat]),
-                    params.height_coeff_a1,
-                    get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]  # wind_height from config
-                )
+            n_valid = length(valid_indices)
+            if n_valid > 0
+                Threads.@threads for t in 1:n_threads
+                    for local_idx in t:n_threads:n_valid
+                        global_idx = valid_indices[local_idx]
+                        i_lon, i_lat = indices[global_idx]
+                        lat = lats[i_lat]
+                        lon = lons[i_lon]
 
-                try
-                    results[index] = run_pixel_spatial(
-                        config, params, year, lat, lon,
-                        spatial_forcing, n_days, co2_ppm,
-                        pixel_mgmt;
-                        i_lon=i_lon, i_lat=i_lat)
-                catch
-                    results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                        pixel_mgmt = ManagementParams(
+                            Int(planting_doy_field[i_lon, i_lat]),
+                            Int(is_irrigated_field[i_lon, i_lat]),
+                            Int(soil_type_field[i_lon, i_lat]),
+                            Float64(n_fertilizer_field[i_lon, i_lat]),
+                            Float64(thermal_time_field[i_lon, i_lat]),
+                            params.height_coeff_a1,
+                            get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]
+                        )
+
+                        try
+                            results[global_idx] = run_pixel_spatial(
+                                config, params, year, lat, lon,
+                                spatial_forcing, n_days, co2_ppm,
+                                pixel_mgmt;
+                                i_lon=i_lon, i_lat=i_lat)
+                        catch
+                            results[global_idx] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                        end
+                    end
                 end
             end
 
@@ -508,6 +605,18 @@ function run_spatial_simulation(config::Config)
             @printf("    Average Harvest DOY: %.1f\n", sum(v_harvest)/length(v_harvest))
             @printf("    Average Yield: %.2f kg/ha\n", sum(v_yield)/length(v_yield))
             @printf("    Average Aboveground Biomass: %.2f kg/ha\n", sum(v_biomass)/length(v_biomass))
+        end
+
+        # Print timing
+        year_elapsed = time() - year_start_time
+        if year_elapsed < 120
+            @printf("    Year %d completed in %.1f seconds\n", year, year_elapsed)
+        elseif year_elapsed < 3600
+            @printf("    Year %d completed in %.1f minutes\n", year, year_elapsed/60)
+        else
+            hours = floor(year_elapsed / 3600)
+            mins = floor(mod(year_elapsed, 3600) / 60)
+            @printf("    Year %d completed in %d hours %.1f minutes\n", year, hours, mins)
         end
     end
 
