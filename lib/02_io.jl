@@ -44,6 +44,7 @@ using TOML
     time_dim::String           # time dimension name in NetCDF
     boundary_file::String      # boundary file path (GeoJSON/Shapefile), empty = no filtering
     boundary_buffer::Float64   # buffer distance (degrees) for boundary contact detection
+    n_chunks::Int              # number of spatial chunks for memory bandwidth optimization (1 = no chunking)
 
     # Output
     output_dir::String
@@ -218,6 +219,7 @@ function read_config(config_path::String)::Config
     time_dim = "time"
     boundary_file = ""
     boundary_buffer = 0.0
+    n_chunks = 1
     output_dir = ""
 
     # Management params (defaults)
@@ -342,6 +344,9 @@ function read_config(config_path::String)::Config
             end
             boundary_buffer = get(boundary_cfg, "buffer_deg", 0.0)
         end
+
+        # --- Spatial chunking ([spatial_simulation] top-level) ---
+        n_chunks = get(raster_cfg, "n_chunks", 1)
     else
         error("Must specify either [point_simulation] or [spatial_simulation]")
     end
@@ -392,6 +397,7 @@ function read_config(config_path::String)::Config
         time_dim          = time_dim,
         boundary_file     = boundary_file,
         boundary_buffer   = boundary_buffer,
+        n_chunks          = n_chunks,
         output_dir        = output_dir,
         output_format     = output_format,
     )

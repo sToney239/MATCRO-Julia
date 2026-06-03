@@ -366,16 +366,23 @@ function run_spatial_simulation(config::Config)
 
     # 4. Year loop
     years = collect(config.start_year:config.end_year)
-    yield_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
-    harvest_doy_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
-    LAI_max_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
-    biomass_aboveground_3d = Array{Float64,3}(undef, n_lon, n_lat, length(years))
+    mkpath(config.output_dir)
+
+    # Spatial chunking: split by longitude to reduce memory bandwidth contention
+    # Each chunk processes a subset of longitude, reducing concurrent memory access
+    n_chunks = config.n_chunks
+    d_lon = length(lons) > 1 ? lons[2] - lons[1] : 1.0
+    if n_chunks > 1
+        chunk_size = ceil(Int, n_lon / n_chunks)
+        lon_chunks = [(i*chunk_size+1, min((i+1)*chunk_size, n_lon)) for i in 0:(n_chunks-1)]
+        println("    Spatial chunking: $n_chunks chunks (~$(round(chunk_size * d_lon, digits=1))° longitude per chunk)")
+    end
 
     for (i_year, year) in enumerate(years)
         println("\n  Year $year ...")
         co2_ppm = read_co2(config, year)
 
-        # Read spatial forcing
+        # Read spatial forcing (full year)
         spatial_forcing = read_forcing_netcdf_spatial(config, year)
         n_days = length(spatial_forcing)
 
@@ -386,80 +393,129 @@ function run_spatial_simulation(config::Config)
         n_fertilizer_field = load_management_param(config, "n_fertilizer", year, n_lon, n_lat; lats=lats, lons=lons)
         thermal_time_field = load_management_param(config, "thermal_time_requirement", year, n_lon, n_lat; lats=lats, lons=lons)
 
-        # Parallel pixel loop
-        indices = [(i_lon, i_lat) for i_lon in 1:n_lon for i_lat in 1:n_lat]
-        results = Vector{NamedTuple}(undef, length(indices))
+        # Initialize output arrays for this year
+        yield_2d = Array{Float64,2}(undef, n_lon, n_lat)
+        harvest_doy_2d = Array{Float64,2}(undef, n_lon, n_lat)
+        biomass_aboveground_2d = Array{Float64,2}(undef, n_lon, n_lat)
 
-        Threads.@threads for index in eachindex(indices)
-            i_lon, i_lat = indices[index]
-            # Skip pixels outside boundary
-            if boundary_mask !== nothing && !boundary_mask[i_lon, i_lat]
-                results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
-                continue
+        if n_chunks > 1
+            # Process each chunk sequentially
+            for (chunk_idx, (lon_start, lon_end)) in enumerate(lon_chunks)
+                # Build indices for this chunk only
+                chunk_indices = [(i_lon, i_lat) for i_lon in lon_start:lon_end for i_lat in 1:n_lat]
+                results = Vector{NamedTuple}(undef, length(chunk_indices))
+
+                Threads.@threads for index in eachindex(chunk_indices)
+                    i_lon, i_lat = chunk_indices[index]
+                    # Skip pixels outside boundary
+                    if boundary_mask !== nothing && !boundary_mask[i_lon, i_lat]
+                        results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                        continue
+                    end
+                    lat = lats[i_lat]
+                    lon = lons[i_lon]
+
+                    # Build per-pixel management params
+                    pixel_mgmt = ManagementParams(
+                        Int(planting_doy_field[i_lon, i_lat]),
+                        Int(is_irrigated_field[i_lon, i_lat]),
+                        Int(soil_type_field[i_lon, i_lat]),
+                        Float64(n_fertilizer_field[i_lon, i_lat]),
+                        Float64(thermal_time_field[i_lon, i_lat]),
+                        params.height_coeff_a1,
+                        get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]  # wind_height from config
+                    )
+
+                    try
+                        results[index] = run_pixel_spatial(
+                            config, params, year, lat, lon,
+                            spatial_forcing, n_days, co2_ppm,
+                            pixel_mgmt;
+                            i_lon=i_lon, i_lat=i_lat)
+                    catch
+                        results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                    end
+                end
+
+                # Collect results into output arrays
+                for (idx, (i_lon, i_lat)) in enumerate(chunk_indices)
+                    yield_2d[i_lon, i_lat] = results[idx].yield
+                    harvest_doy_2d[i_lon, i_lat] = results[idx].harvest_doy
+                    biomass_aboveground_2d[i_lon, i_lat] = results[idx].biomass_aboveground
+                end
+
+                println("    Chunk $chunk_idx/$n_chunks done")
             end
-            lat = lats[i_lat]
-            lon = lons[i_lon]
+        else
+            # No chunking: process all pixels at once
+            indices = [(i_lon, i_lat) for i_lon in 1:n_lon for i_lat in 1:n_lat]
+            results = Vector{NamedTuple}(undef, length(indices))
 
-            # Build per-pixel management params
-            pixel_mgmt = ManagementParams(
-                Int(planting_doy_field[i_lon, i_lat]),
-                Int(is_irrigated_field[i_lon, i_lat]),
-                Int(soil_type_field[i_lon, i_lat]),
-                Float64(n_fertilizer_field[i_lon, i_lat]),
-                Float64(thermal_time_field[i_lon, i_lat]),
-                params.height_coeff_a1, 
-                get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]  # wind_height from config
-            )
+            Threads.@threads for index in eachindex(indices)
+                i_lon, i_lat = indices[index]
+                # Skip pixels outside boundary
+                if boundary_mask !== nothing && !boundary_mask[i_lon, i_lat]
+                    results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                    continue
+                end
+                lat = lats[i_lat]
+                lon = lons[i_lon]
 
-            try
-                results[index] = run_pixel_spatial(
-                    config, params, year, lat, lon,
-                    spatial_forcing, n_days, co2_ppm,
-                    pixel_mgmt;
-                    i_lon=i_lon, i_lat=i_lat)
-            catch
-                results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                # Build per-pixel management params
+                pixel_mgmt = ManagementParams(
+                    Int(planting_doy_field[i_lon, i_lat]),
+                    Int(is_irrigated_field[i_lon, i_lat]),
+                    Int(soil_type_field[i_lon, i_lat]),
+                    Float64(n_fertilizer_field[i_lon, i_lat]),
+                    Float64(thermal_time_field[i_lon, i_lat]),
+                    params.height_coeff_a1,
+                    get(config.raster_vars, "wnd", Dict("height"=>10.0))["height"]  # wind_height from config
+                )
+
+                try
+                    results[index] = run_pixel_spatial(
+                        config, params, year, lat, lon,
+                        spatial_forcing, n_days, co2_ppm,
+                        pixel_mgmt;
+                        i_lon=i_lon, i_lat=i_lat)
+                catch
+                    results[index] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
+                end
+            end
+
+            # Collect results into output arrays
+            for (idx, (i_lon, i_lat)) in enumerate(indices)
+                yield_2d[i_lon, i_lat] = results[idx].yield
+                harvest_doy_2d[i_lon, i_lat] = results[idx].harvest_doy
+                biomass_aboveground_2d[i_lon, i_lat] = results[idx].biomass_aboveground
             end
         end
 
-        for (index, (i_lon, i_lat)) in enumerate(indices)
-            yield_3d[i_lon, i_lat, i_year] = results[index].yield
-            harvest_doy_3d[i_lon, i_lat, i_year] = results[index].harvest_doy
-            LAI_max_3d[i_lon, i_lat, i_year] = results[index].LAI_max
-            biomass_aboveground_3d[i_lon, i_lat, i_year] = results[index].biomass_aboveground
-        end
+        # Write output for this year immediately
+        write_float64_tif(yield_2d, lats, lons, year,
+                          joinpath(config.output_dir, "yield_$(year).tif"); unit="kg/ha")
+        write_harvest_doy_tif(harvest_doy_2d, lats, lons, year,
+                              joinpath(config.output_dir, "harvest_doy_$(year).tif"))
+        write_float64_tif(biomass_aboveground_2d, lats, lons, year,
+                          joinpath(config.output_dir, "biomass_aboveground_$(year).tif"); unit="kg/ha")
 
-        valid_mask = .!isnan.(yield_3d[:, :, i_year])
+        # Print statistics
+        valid_mask = .!isnan.(yield_2d)
         if any(valid_mask)
-            v_yield = yield_3d[:, :, i_year][valid_mask]
-            v_harvest = harvest_doy_3d[:, :, i_year][valid_mask]
-            v_lai = LAI_max_3d[:, :, i_year][valid_mask]
-            v_biomass = biomass_aboveground_3d[:, :, i_year][valid_mask]
-            @printf("    Average Yield: %.2f kg/ha, Average Harvest DOY: %.1f\n",
-                    sum(v_yield)/length(v_yield), sum(v_harvest)/length(v_harvest))
-            @printf("    Average Aboveground Biomass: %.2f kg/ha, Average Max LAI: %.2f\n",
-                    sum(v_biomass)/length(v_biomass),sum(v_lai)/length(v_lai))
+            v_yield = yield_2d[valid_mask]
+            v_harvest = harvest_doy_2d[valid_mask]
+            v_biomass = biomass_aboveground_2d[valid_mask]
+            @printf("    Average Harvest DOY: %.1f\n", sum(v_harvest)/length(v_harvest))
+            @printf("    Average Yield: %.2f kg/ha\n", sum(v_yield)/length(v_yield))
+            @printf("    Average Aboveground Biomass: %.2f kg/ha\n", sum(v_biomass)/length(v_biomass))
         end
-    end
-
-    # 5. Write output
-    mkpath(config.output_dir)
-    for (i_year, year) in enumerate(years)
-        yield_path = joinpath(config.output_dir, "yield_$(year).tif")
-        harvest_path = joinpath(config.output_dir, "harvest_doy_$(year).tif")
-        LAI_max_path = joinpath(config.output_dir, "LAI_max_$(year).tif")
-        biomass_path = joinpath(config.output_dir, "biomass_aboveground_$(year).tif")
-        write_float64_tif(yield_3d[:, :, i_year], lats, lons, year, yield_path; unit="kg/ha")
-        write_harvest_doy_tif(harvest_doy_3d[:, :, i_year], lats, lons, year, harvest_path)
-        write_float64_tif(LAI_max_3d[:, :, i_year], lats, lons, year, LAI_max_path; unit="m2/m2")
-        write_float64_tif(biomass_aboveground_3d[:, :, i_year], lats, lons, year, biomass_path; unit="kg/ha")
     end
 
     println("\n" * "=" ^ 60)
     println("  Spatial Simulation Complete")
     println("  Output saved to: ", abspath(config.output_dir))
     println("=" ^ 60)
-    return yield_3d
+    return nothing
 end
 
 # ============================================================

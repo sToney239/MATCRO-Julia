@@ -109,15 +109,29 @@ Spatial simulation mode with NetCDF/TIFF data.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `output_directory` | String | "output/" | Output directory path (relative to config file, or absolute) |
+| `n_chunks` | Int | 1 | Number of spatial chunks for parallel processing. See notes below. |
 
-Foe this spatial simulation section, the model outputs **one GeoTIFF file per year**. Four files are generated for each simulation year:
+For this spatial simulation section, the model outputs **one GeoTIFF file per year**. Three files are generated for each simulation year:
 
 - `yield_YYYY.tif`: Crop yield (kg/ha), Float64
 - `harvest_doy_YYYY.tif`: Harvest day of year, Int32
-- `LAI_max_YYYY.tif`: Seasonal maximum leaf area index (m²/m²), Float64
 - `biomass_aboveground_YYYY.tif`: Aboveground biomass at harvest (kg/ha), Float64
 
 The TIF files use WGS84 (EPSG:4326) coordinate reference system, with geotransform metadata for proper geospatial alignment.
+
+**`n_chunks` — Spatial chunking for memory bandwidth optimization**
+
+When running large spatial domains with many threads (`-t N`), you may observe CPU utilization well below the expected level (e.g., 50% with `-t 14`). This is typically caused by memory bandwidth saturation — all threads compete for access to the same large forcing arrays, and CPUs spend time waiting for data rather than computing.
+
+Setting `n_chunks` > 1 splits the longitude range into multiple chunks. Chunks are processed sequentially, with only the current chunk's pixels running in parallel. This reduces concurrent memory bandwidth demand and can significantly improve CPU utilization.
+
+Recommended values: start with `n_chunks = 4` or `n_chunks = 8`, and adjust based on observed CPU usage. When `n_chunks = 1` (default), all pixels are processed in a single parallel pass (original behavior).
+
+```toml
+[spatial_simulation]
+output_directory = "output/"
+n_chunks = 4
+```
 
 ### 2.2.1 Weather: `[spatial_simulation.weather]`
 
@@ -272,7 +286,6 @@ The boundary CRS is automatically converted to WGS84 (EPSG:4326) if it differs f
 Output: GeoTIFF files per year in `output_directory`:
 - `yield_YYYY.tif`: Crop yield (kg/ha), Float64
 - `harvest_doy_YYYY.tif`: Harvest day of year, Int32
-- `LAI_max_YYYY.tif`: Seasonal maximum leaf area index (m²/m²), Float64
 - `biomass_aboveground_YYYY.tif`: Aboveground biomass at harvest (kg/ha), Float64
 
 All files use WGS84 (EPSG:4326) CRS with proper geotransform metadata.
