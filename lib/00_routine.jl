@@ -498,6 +498,10 @@ function run_spatial_simulation(config::Config)
 
             n_valid = length(valid_indices)
             if n_valid > 0
+                # Progress tracking (lock-free, occasional race in print is harmless)
+                completed = Threads.Atomic{Int}(0)
+                step = max(1, n_valid ÷ 20)  # update every ~5%
+                print_lock = ReentrantLock()
                 Threads.@threads for t in 1:n_threads
                     for local_idx in t:n_threads:n_valid
                         global_idx = valid_indices[local_idx]
@@ -524,8 +528,23 @@ function run_spatial_simulation(config::Config)
                         catch
                             results[global_idx] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
                         end
+
+                        # Update progress bar (thread-safe)
+                        done = Threads.atomic_add!(completed, 1)
+                        if mod(done, step) == 0 || done == n_valid
+                            lock(print_lock) do
+                                pct = round(Int, done / n_valid * 100)
+                                bar_len = 25
+                                filled = done * bar_len ÷ n_valid
+                                bar = repeat("=", max(0, filled - 1)) * (filled > 0 ? ">" : "")
+                                bar *= repeat(" ", max(0, bar_len - filled))
+                                print("\r    [", bar, "] ", pct, "%")
+                                flush(stdout)
+                            end
+                        end
                     end
                 end
+                println()  # move past progress bar line
             end
 
             # Collect results into output arrays
