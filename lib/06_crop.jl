@@ -645,67 +645,45 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
     crop.leaf_nitrogen = sln
 end
 
-# ============ Top-level crop step function (positional args eliminate kwarg overhead) ============
-function crop_step!(crop::CropState, params::CropParameters,
+# ============ Top-level crop step function ============
+function crop_step!(crop::CropState;
                     doy::Int, hour::Float64, Δt::Int,
                     temperature::Float64, gpp::Float64, rsp::Float64,
-                    planting_doy::Int, thermal_time_requirement::Float64,
-                    n_fertilizer_amt::Float64, co2_ppm::Float64,
-                    is_irrigated::Int, max_crop_height::Float64,
+                    planting_doy::Int, thermal_time_requirement::Float64, half_progress::Float64,
+                    needs_vernalization::Int, base_temp::Float64,
+                    optimal_temp::Float64, ceiling_temp::Float64,
+                    vernalization_saturation::Float64,
+                    k_leaf_convert::Float64, k_stem_convert::Float64,
+                    k_root_convert::Float64, k_grain_convert::Float64,
+                    fraction_starch_reserve::Float64,
+                    shoot_progress_1::Float64,
+                    shoot_alloc_ratio_1::Float64, shoot_progress_2::Float64,
+                    leaf_alloc_ratio_0::Float64,
+                    leaf_progress_1::Float64, leaf_alloc_ratio_1::Float64,
+                    leaf_progress_2::Float64, leaf_alloc_ratio_2::Float64,
+                    panicle_progress_1::Float64, panicle_alloc_ratio_1::Float64,
+                    panicle_progress_2::Float64, panicle_alloc_ratio_2::Float64,
+                    panicle_progress_3::Float64, panicle_alloc_ratio_3::Float64,
+                    dead_prgress_1::Float64, dead_ratio_1::Float64,
+                    dead_prgress_2::Float64, dead_ratio_2::Float64,
+                    dead_prgress_3::Float64, dead_ratio_3::Float64,
+                    leaf_nitrogen_x1::Float64, leaf_nitrogen_x2::Float64, leaf_nitrogen_x3::Float64,
+                    leaf_nitrogen_max::Float64, leaf_nitrogen_min::Float64,
+                    leaf_nitrogen_sensitivity::Float64,
+                    LAI_threshold_grain::Float64, k_leaf_loss::Float64,
+                    leaf_weight_min::Float64, leaf_weight_max::Float64,
+                    leaf_weight_decay_rate::Float64,
+                    max_crop_height::Float64,
+                    root_growth_rate::Float64, max_root_length::Float64,
+                    n_fertilizer::Float64, co2_ppm::Float64,
+                    is_irrigated::Int,
+                    cold_damage_threshold::Float64,
+                    heat_damage_threshold::Float64,
+                    harvest_index::Float64,
+                    harvest_temp_threshold::Float64,
                     five_day_temp_buffer::Vector{Float64},
                     five_day_temp_count::Int,
                     crop_type::CropType)
-
-    # Unpack params fields for local access
-    half_progress = params.half_progress
-    needs_vernalization = params.needs_vernalization
-    base_temp = params.base_temp
-    optimal_temp = params.optimal_temp
-    ceiling_temp = params.ceiling_temp
-    vernalization_saturation = params.vernalization_saturation
-    k_leaf_convert = params.k_leaf_convert
-    k_stem_convert = params.k_stem_convert
-    k_root_convert = params.k_root_convert
-    k_grain_convert = params.k_grain_convert
-    fraction_starch_reserve = params.fraction_starch_reserve
-    shoot_progress_1 = params.shoot_progress_1
-    shoot_alloc_ratio_1 = params.shoot_alloc_ratio_1
-    shoot_progress_2 = params.shoot_progress_2
-    leaf_alloc_ratio_0 = params.leaf_alloc_ratio_0
-    leaf_progress_1 = params.leaf_progress_1
-    leaf_alloc_ratio_1 = params.leaf_alloc_ratio_1
-    leaf_progress_2 = params.leaf_progress_2
-    leaf_alloc_ratio_2 = params.leaf_alloc_ratio_2
-    panicle_progress_1 = params.panicle_progress_1
-    panicle_alloc_ratio_1 = params.panicle_alloc_ratio_1
-    panicle_progress_2 = params.panicle_progress_2
-    panicle_alloc_ratio_2 = params.panicle_alloc_ratio_2
-    panicle_progress_3 = params.panicle_progress_3
-    panicle_alloc_ratio_3 = params.panicle_alloc_ratio_3
-    dead_prgress_1 = params.dead_progress_1
-    dead_ratio_1 = params.dead_ratio_1
-    dead_prgress_2 = params.dead_progress_2
-    dead_ratio_2 = params.dead_ratio_2
-    dead_prgress_3 = params.dead_progress_3
-    dead_ratio_3 = params.dead_ratio_3
-    leaf_nitrogen_x1 = params.leaf_nitrogen_x1
-    leaf_nitrogen_x2 = params.leaf_nitrogen_x2
-    leaf_nitrogen_x3 = params.leaf_nitrogen_x3
-    leaf_nitrogen_max = params.leaf_nitrogen_max
-    leaf_nitrogen_min = params.leaf_nitrogen_min
-    leaf_nitrogen_sensitivity = params.leaf_nitrogen_sensitivity
-    LAI_threshold_grain = params.LAI_threshold_grain
-    k_leaf_loss = params.k_leaf_loss
-    leaf_weight_min = params.leaf_weight_min
-    leaf_weight_max = params.leaf_weight_max
-    leaf_weight_decay_rate = params.leaf_weight_decay_rate
-    root_growth_rate = params.root_growth_rate
-    max_root_length = params.max_root_length
-    cold_damage_threshold = params.cold_damage_threshold
-    heat_damage_threshold = params.heat_damage_threshold
-    harvest_index = params.harvest_index
-    harvest_temp_threshold = params.harvest_temp_threshold
-    n_fertilizer = n_fertilizer_amt
 
     # 1. Judge planting
     judge_planting!(crop, doy, hour, planting_doy, is_irrigated)
