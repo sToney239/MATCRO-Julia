@@ -11,11 +11,15 @@ const NocT = 4.0            # nocturnal time coefficient
 
 # ============ DAYL: day length [hours] ============
 function day_length(doy::Int, lat::Float64)::Float64
-    # Solar declination
-    del = -asin(sin(23.45 * 2π / 360) * cos(2π * (Float64(doy) + 10.0) / 365.0))
+    del = solar_declination(doy)
     latrad = 2π * lat / 360.0
+    _day_length_from_rad(latrad, del)
+end
 
-    dd = sin(latrad) * sin(del) / (cos(latrad) * cos(del))
+@inline function _day_length_from_rad(latrad::Float64, del::Float64)::Float64
+    sinlat, coslat = sin(latrad), cos(latrad)
+    sindel, cosdel = sin(del), cos(del)
+    dd = sinlat * sindel / (coslat * cosdel)
 
     if dd > 1.0
         return 24.0
@@ -29,16 +33,20 @@ end
 # ============ SINB: sin(solar elevation) ============
 # Goudriaan and van Laar (1994)
 function sin_solar_elevation(doy::Int, hour::Float64, lat::Float64)::Float64
-    # Solar declination
-    del = -asin(sin(23.45 * 2π / 360) * cos(2π * (Float64(doy) + 10.0) / 365.0))
-    # Hour angle
+    del = solar_declination(doy)
     h = π * (hour - 12.0) / 12.0
     latrad = 2π * lat / 360.0
+    return max(0.0, sin(latrad) * sin(del) + cos(latrad) * cos(del) * cos(h))
+end
 
+# Precomputed version: avoids recomputing solar declination & latrad (per-day cache)
+@inline function sin_solar_elevation_precomp(del::Float64, latrad::Float64, hour::Float64)::Float64
+    h = π * (hour - 12.0) / 12.0
     return max(0.0, sin(latrad) * sin(del) + cos(latrad) * cos(del) * cos(h))
 end
 
 # ============ INTERPOLATE_TIME: main interpolation function ============
+# Optional del/latrad: when provided, skip recomputing solar declination per call
 function interpolate_time(; doy::Int, prev_doy::Int, next_doy::Int, hour::Float64,
                  lat::Float64, Δt::Int,
                  # Daily inputs
@@ -55,12 +63,24 @@ function interpolate_time(; doy::Int, prev_doy::Int, next_doy::Int, hour::Float6
                  pressure::Float64,     # INPRS: daily air pressure [Pa]
                  ozone::Float64,        # INOZN: daily ozone
                  int_sinb::Float64,     # INTSINB: integrated sin(solar elevation) over day
-                 wind_height::Float64   # WND_HGT: wind measurement height [m]
+                 wind_height::Float64,  # WND_HGT: wind measurement height [m]
+                 del::Float64 = 0.0,    # solar declination (optional, precomputed per DOY)
+                 del_prev::Float64 = 0.0, # solar declination for prev DOY (optional)
+                 latrad::Float64 = 0.0  # latitude in radians (optional, precomputed)
                  )::NamedTuple
 
-    # Day length
-    dl = day_length(doy, lat)
-    dlp = day_length(prev_doy, lat)
+    # Day length: use precomputed latrad/del if provided
+    if latrad != 0.0
+        dl = _day_length_from_rad(latrad, del)
+        if del_prev != 0.0
+            dlp = _day_length_from_rad(latrad, del_prev)
+        else
+            dlp = dl
+        end
+    else
+        dl = day_length(doy, lat)
+        dlp = day_length(prev_doy, lat)
+    end
 
     # Convert K → °C for Goudriaan temperature interpolation
     tmax_prev_c = tmax_prev - T_ice
@@ -80,7 +100,11 @@ function interpolate_time(; doy::Int, prev_doy::Int, next_doy::Int, hour::Float6
 
     # Radiation: distribute daily total proportional to sin(solar elevation)
     if int_sinb > 0.0
-        rsd = radiation * 86400.0 * sin_solar_elevation(doy, hour, lat) / int_sinb
+        if latrad != 0.0
+            rsd = radiation * 86400.0 * sin_solar_elevation_precomp(del, latrad, hour) / int_sinb
+        else
+            rsd = radiation * 86400.0 * sin_solar_elevation(doy, hour, lat) / int_sinb
+        end
     else
         rsd = 0.0
     end

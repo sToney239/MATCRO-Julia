@@ -19,7 +19,8 @@ using TOML
     latitude::Float64          # [degree]
 
     # Crop
-    crop_name::String          # "Maize", "Rice", "Wheat", "Soybean"
+    crop_name::String          # "Maize", "Rice", "Wheat", "Soybean" (for display only)
+    crop_type::CropType        # enum for type-stable dispatch in hot path
     crop_param_file::String    # path to TOML parameter file
     planting_doy::Int          # planting day of year
     is_irrigated::Int          # 0 = rainfed, 1 = irrigated
@@ -373,6 +374,17 @@ function read_config(config_path::String)::Config
         error("start_doy ($start_doy_val) must be < end_doy ($end_doy_val)")
     end
 
+    # Convert crop_name string to CropType enum for type-stable dispatch
+    crop_type = if haskey(gen, "crop_name")
+        cn = gen["crop_name"]
+        cn == "Rice" ? RICE :
+        cn == "Wheat" ? WHEAT :
+        cn == "Soybeans" ? SOYBEAN :
+        cn == "Maize" ? MAIZE : MAIZE  # default
+    else
+        MAIZE
+    end
+
     return Config(;
         start_year        = gen["start_year"],
         end_year          = gen["end_year"],
@@ -381,6 +393,7 @@ function read_config(config_path::String)::Config
         time_step         = get(gen, "time_step", 3600),
         latitude          = latitude,
         crop_name         = gen["crop_name"],
+        crop_type         = crop_type,
         crop_param_file   = crop_param_file,
         planting_doy      = planting_doy,
         is_irrigated      = is_irrigated,
@@ -521,8 +534,15 @@ function read_co2(config::Config, year::Int)::Float64
 end
 
 # ============================================================
-# calc_int_sinb — integrated sin(solar elevation) over a day
-# Used by tinterp to distribute daily radiation to hourly
+# solar_declination — compute solar declination for a given day of year
+# ============================================================
+@inline function solar_declination(doy::Int)::Float64
+    return -asin(EARTH_OBLIQUITY * cos(2π * (Float64(doy) + 10.0) / 365.0))
+end
+
+# ============================================================
+# calc_int_sinb — integrated sin(solar elevation) over a day [seconds]
+# Uses midpoint-rule numerical integration (matching original)
 # ============================================================
 function calc_int_sinb(doy::Int, lat::Float64, Δt::Int)::Float64
     int_sinb = 0.0
