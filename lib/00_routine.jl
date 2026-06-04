@@ -94,16 +94,68 @@ function run_hourly_step!(crop, params, doy, hour, Δt, lat, crop_type::CropType
     rsp = phsyn_result.rsp
     tsp = phsyn_result.tsp
 
-    # ----- CROP (growth simulation) — positional args -----
-    crop_step!(crop, params,
-        doy, hour, Δt,
-        tmp_K, gpp, rsp,
-        mgmt.planting_doy + Int(params.planting_offset),
-        mgmt.thermal_time_requirement,
-        mgmt.n_fertilizer, co2_ppm,
-        mgmt.is_irrigated, mgmt.max_crop_height,
-        five_day_buffer, five_day_count,
-        crop_type)
+    # ----- CROP (growth simulation) -----
+    crop_step!(crop;
+        doy=doy, hour=hour, Δt=Δt,
+        temperature=tmp_K, gpp=gpp, rsp=rsp,
+        planting_doy=mgmt.planting_doy + Int(params.planting_offset),
+        thermal_time_requirement=mgmt.thermal_time_requirement,
+        half_progress=params.half_progress,
+        needs_vernalization=params.needs_vernalization,
+        base_temp=params.base_temp,
+        optimal_temp=params.optimal_temp,
+        ceiling_temp=params.ceiling_temp,
+        vernalization_saturation=params.vernalization_saturation,
+        k_leaf_convert=params.k_leaf_convert,
+        k_stem_convert=params.k_stem_convert,
+        k_root_convert=params.k_root_convert,
+        k_grain_convert=params.k_grain_convert,
+        fraction_starch_reserve=params.fraction_starch_reserve,
+        shoot_progress_1=params.shoot_progress_1,
+        shoot_alloc_ratio_1=params.shoot_alloc_ratio_1,
+        shoot_progress_2=params.shoot_progress_2,
+        leaf_alloc_ratio_0=params.leaf_alloc_ratio_0,
+        leaf_progress_1=params.leaf_progress_1,
+        leaf_alloc_ratio_1=params.leaf_alloc_ratio_1,
+        leaf_progress_2=params.leaf_progress_2,
+        leaf_alloc_ratio_2=params.leaf_alloc_ratio_2,
+        panicle_progress_1=params.panicle_progress_1,
+        panicle_alloc_ratio_1=params.panicle_alloc_ratio_1,
+        panicle_progress_2=params.panicle_progress_2,
+        panicle_alloc_ratio_2=params.panicle_alloc_ratio_2,
+        panicle_progress_3=params.panicle_progress_3,
+        panicle_alloc_ratio_3=params.panicle_alloc_ratio_3,
+        dead_prgress_1=params.dead_progress_1,
+        dead_ratio_1=params.dead_ratio_1,
+        dead_prgress_2=params.dead_progress_2,
+        dead_ratio_2=params.dead_ratio_2,
+        dead_prgress_3=params.dead_progress_3,
+        dead_ratio_3=params.dead_ratio_3,
+        leaf_nitrogen_x1=params.leaf_nitrogen_x1,
+        leaf_nitrogen_x2=params.leaf_nitrogen_x2,
+        leaf_nitrogen_x3=params.leaf_nitrogen_x3,
+        leaf_nitrogen_max=params.leaf_nitrogen_max,
+        leaf_nitrogen_min=params.leaf_nitrogen_min,
+        leaf_nitrogen_sensitivity=params.leaf_nitrogen_sensitivity,
+        LAI_threshold_grain=params.LAI_threshold_grain,
+        k_leaf_loss=params.k_leaf_loss,
+        leaf_weight_min=params.leaf_weight_min,
+        leaf_weight_max=params.leaf_weight_max,
+        leaf_weight_decay_rate=params.leaf_weight_decay_rate,
+        max_crop_height=mgmt.max_crop_height,
+        root_growth_rate=params.root_growth_rate,
+        max_root_length=params.max_root_length,
+        n_fertilizer=mgmt.n_fertilizer,
+        co2_ppm=co2_ppm,
+        is_irrigated=mgmt.is_irrigated,
+        cold_damage_threshold=params.cold_damage_threshold,
+        heat_damage_threshold=params.heat_damage_threshold,
+        harvest_index=params.harvest_index,
+        harvest_temp_threshold=params.harvest_temp_threshold,
+        five_day_temp_buffer=five_day_buffer,
+        five_day_temp_count=five_day_count,
+        crop_type=crop_type
+    )
 
     # ----- SOIL (water balance) -----
     tsp_W = tsp * L_vaporization
@@ -498,6 +550,10 @@ function run_spatial_simulation(config::Config)
 
             n_valid = length(valid_indices)
             if n_valid > 0
+                # Progress tracking (lock-free, occasional race in print is harmless)
+                completed = Threads.Atomic{Int}(0)
+                step = max(1, n_valid ÷ 20)  # update every ~5%
+                print_lock = ReentrantLock()
                 Threads.@threads for t in 1:n_threads
                     for local_idx in t:n_threads:n_valid
                         global_idx = valid_indices[local_idx]
@@ -524,8 +580,23 @@ function run_spatial_simulation(config::Config)
                         catch
                             results[global_idx] = (yield=NaN, harvest_doy=NaN, LAI_max=NaN, biomass_aboveground=NaN)
                         end
+
+                        # Update progress bar (thread-safe)
+                        done = Threads.atomic_add!(completed, 1)
+                        if mod(done, step) == 0 || done == n_valid
+                            lock(print_lock) do
+                                pct = round(Int, done / n_valid * 100)
+                                bar_len = 25
+                                filled = done * bar_len ÷ n_valid
+                                bar = repeat("=", max(0, filled - 1)) * (filled > 0 ? ">" : "")
+                                bar *= repeat(" ", max(0, bar_len - filled))
+                                print("\r    [", bar, "] ", pct, "%")
+                                flush(stdout)
+                            end
+                        end
                     end
                 end
+                println()  # move past progress bar line
             end
 
             # Collect results into output arrays
