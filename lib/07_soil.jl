@@ -3,11 +3,23 @@
 # Soil water: Richards equation with Campbell (1985) / Clapp-Hornberger (1978)
 # Evaporation: Sellers (1996), FAO56 aerodynamic resistance
 
+using LinearAlgebra: Tridiagonal
 
 # ============ soil-specific constants ============
 const n_layer = 5                                      # number of soil layers
 const layer_width = [0.05, 0.20, 0.75, 1.00, 2.00]       # layer thickness [m]
 const ZA  = 2.0                                    # reference height [m]
+
+# Precompute layer geometry (constant, avoids repeated allocation in hot path)
+const _layer_width_ave = [(layer_width[i] + layer_width[i+1]) * 0.5 for i in 1:n_layer-1]
+const _depth = let
+    d = Vector{Float64}(undef, n_layer + 1)
+    d[1] = 0.0
+    for i in 1:n_layer
+        d[i+1] = i == 1 ? layer_width[1] : d[i] + layer_width[i]
+    end
+    d
+end
 
 # Soil texture parameters (13 USDA textures, Table 6)
 #  1:heavy clay  2:silty clay  3:clay  4:silty clay loam  5:clay loam
@@ -36,7 +48,7 @@ function calc_soil_water(;
     specific_humidity::Float64,      # specific humidity Q [kg/kg]
     crop_height::Float64,            # crop height [m]
     is_planted::Int,                 # plant flag (0=no plant, 1/2=plant)
-    crop_name::String)               # crop name
+    crop_type::CropType)               # crop type enum
 
     # ===== 1. Soil texture parameters (Table 6) =====
     ψ_sat = Float64(ψ_sat_T[soil_type_i])  # ψ_s: saturated water potential (code units, Table 6)
@@ -55,12 +67,9 @@ function calc_soil_water(;
     ADSW = porosity * ((-3e7 / ρ_water) / ψ_sat)^(-1.0 / B_frac)
 
 
-    # ===== 2. Layer width / depth / soil water content =====
-    layer_width_ave = [(layer_width[i] + layer_width[i+1]) * 0.5 for i in 1:n_layer-1]
-    depth = zeros(Float64, n_layer + 1)   # depth[1]=0, depth[i+1]=depth to bottom of layer i
-    for i in 1:n_layer
-        depth[i+1] = i == 1 ? layer_width[1] : depth[i] + layer_width[i]
-    end
+    # ===== 2. Layer width / depth (precomputed constants, zero runtime cost) =====
+    depth = _depth
+    layer_width_ave = _layer_width_ave
 
     # Clamp soil water
     for i in 1:n_layer
@@ -216,28 +225,31 @@ function calc_soil_water(;
         Δflux_water[i, 2] = (-KB[i] / layer_width_ave[i]) * (B_frac * ψ_sat / porosity * (layer_water[i+1] / porosity)^(-B_frac - 1.0))
     end
 
-    A = zeros(Float64, n_layer, n_layer)
-    b = zeros(Float64, n_layer)
+    # Build tridiagonal system directly (no dense matrix allocation)
+    dl = zeros(Float64, n_layer - 1)   # lower diagonal
+    d  = zeros(Float64, n_layer)       # main diagonal
+    du = zeros(Float64, n_layer - 1)   # upper diagonal
+    b  = zeros(Float64, n_layer)
 
     for i in 1:n_layer
         if i == 1
-            A[1, 1] = -ρ_water * layer_width[1] / Float64(Δt) - Δflux_water[1, 1]
-            A[1, 2] =                                         - Δflux_water[1, 2]
-            b[1]    = -flux_water[1] + flux_water[2]
+            d[1]  = -ρ_water * layer_width[1] / Float64(Δt) - Δflux_water[1, 1]
+            du[1] =                                          - Δflux_water[1, 2]
+            b[1]  = -flux_water[1] + flux_water[2]
         elseif i < n_layer
-            A[i, i-1] =   Δflux_water[i-1, 1]
-            A[i, i]   = - ρ_water * layer_width[i] / Float64(Δt) + Δflux_water[i-1, 2] - Δflux_water[i, 1]
-            A[i, i+1] = - Δflux_water[i, 2]
-            b[i]      = - flux_water[i] + flux_water[i+1]
+            dl[i-1] =   Δflux_water[i-1, 1]
+            d[i]    = - ρ_water * layer_width[i] / Float64(Δt) + Δflux_water[i-1, 2] - Δflux_water[i, 1]
+            du[i]   = - Δflux_water[i, 2]
+            b[i]    = - flux_water[i] + flux_water[i+1]
         else  # i == n_layer
-            A[n_layer, n_layer-1] =   Δflux_water[n_layer-1, 1]
-            A[n_layer, n_layer]   = - ρ_water * layer_width[n_layer] / Float64(Δt) + Δflux_water[n_layer-1, 2]
-            b[n_layer]            = - flux_water[n_layer] + flux_water[n_layer+1]
+            dl[n_layer-1] =   Δflux_water[n_layer-1, 1]
+            d[n_layer]    = - ρ_water * layer_width[n_layer] / Float64(Δt) + Δflux_water[n_layer-1, 2]
+            b[n_layer]    = - flux_water[n_layer] + flux_water[n_layer+1]
         end
     end
 
-    # Solve tridiagonal system
-    Δw = A \ b
+    # Solve using Thomas algorithm (O(n) instead of O(n³) LU)
+    Δw = Tridiagonal(dl, d, du) \ b
 
     # Update soil water
     for i in 1:n_layer
@@ -263,22 +275,23 @@ function calc_soil_water(;
 
     # ===== 8. Water stress =====
     # maize paper eq.15
-    FAW     = [min(max(layer_water[i] - wilting_point, 0.0) / (field_capacity - wilting_point), 1.0) for i in 1:n_layer]
-    FAWRICE = [min(max(layer_water[i] - wilting_point, 0.0) / (porosity - wilting_point), 1.0) for i in 1:n_layer]
+    # Precompute the appropriate FAW based on crop type (avoid redundant allocations)
+    denominator = crop_type == RICE ? (porosity - wilting_point) : (field_capacity - wilting_point)
+    FAW = [min(max(layer_water[i] - wilting_point, 0.0) / denominator, 1.0) for i in 1:n_layer]
 
     WSTRS = 0.0
     for i in 1:n_layer
-        if crop_name == "Rice"
+        if crop_type == RICE
             # Paddy: FAW based on porosity (flooded = no stress), threshold=0.8
-            FSTRS = FAWRICE[i] > 0.8 ? 1.0 : FAWRICE[i] / 0.8
-        elseif crop_name == "Soybean"
+            FSTRS = FAW[i] > 0.8 ? 1.0 : FAW[i] / 0.8
+        elseif crop_type == SOYBEAN
             # FAO56-style, threshold=0.5
             FSTRS = FAW[i] > 0.5 ? 1.0 : FAW[i] / 0.5
-        elseif crop_name == "Wheat" || crop_name == "Maize"
+        elseif crop_type == WHEAT || crop_type == MAIZE
             # FAO56 p=0.55 → threshold=0.45
             FSTRS = FAW[i] > 0.45 ? 1.0 : FAW[i] / 0.45
         else
-            error("Unknown crop: $crop_name. Use Rice, Wheat, Soybean, or Maize")
+            error("Unknown crop_type: $crop_type")
         end
         # Eq.78: weight by root distribution
         WSTRS += FSTRS * f_r[i]

@@ -22,7 +22,7 @@ function calc_radiation(;
     lat::Float64,            # latitude [degree]
     doy::Int,                # day of year D_oy
     hour::Float64,           # hour of day
-    crop_name::String,       # crop name ("Rice","Wheat","Soybean","Maize")
+    crop_type::CropType,     # crop type enum for type-stable dispatch
     development_stage::Float64)  # development stage [-]
 
     # ===== 1. Solar geometry =====
@@ -55,11 +55,11 @@ function calc_radiation(;
     # ===== 3. Canopy Vmax top (crop-specific leaf_nitrogen→Vmax) =====
     # Vmax_top: maximum Rubisco capacity at the canopy top
     # Masutomi et al. (2016)
-    if crop_name == "Rice" || crop_name == "Wheat"
+    if crop_type == RICE || crop_type == WHEAT
         Vmax_top = min(87.04 * (leaf_nitrogen - 0.487), 138.77)             # [μmol/m²/s]
-    elseif crop_name == "Soybean"
+    elseif crop_type == SOYBEAN
         Vmax_top = min(max(-18.516 * leaf_nitrogen^2 + 114.33 * leaf_nitrogen - 73.336, 0.0), 103.0)
-    elseif crop_name == "Maize"
+    elseif crop_type == MAIZE
         if development_stage < 0.52
             # Vegetative: Vos et al. (2005)
             Vmax_top = 45.1 * (2.0 / (1.0 + exp(-2.9 * (leaf_nitrogen - 0.25))) - 1.0)
@@ -70,7 +70,7 @@ function calc_radiation(;
             error("Maize development_stage=$development_stage out of range (must be < 1.01)")
         end
     else
-        error("Unknown crop: $crop_name. Use Rice, Wheat, Soybean, or Maize")
+        error("Unknown crop_type: $crop_type")
     end
 
     # Canopy-average Vmax (CLM scheme)
@@ -87,7 +87,7 @@ function calc_radiation(;
     end
 
     # ===== 5. Direct/diffuse PARtitioning (Goudriaan & van Laar 1994) =====
-    # Eq.19: 
+    # Eq.19:
     # sc: extraterrestrial radiation R_ex
     radiation_extraterrestrial = 1370.0 * (1.0 + 0.033 * cos(2.0 * π * Float64(doy) / 365.0))  # [W/m²]
 
@@ -107,12 +107,12 @@ function calc_radiation(;
             frac_rad = 1.47 - 1.66 * transmissivity_atmosphere
         end
         frac_rad = max(frac_rad, 0.15 + 0.85 * (1.0 - exp(-0.1 / cos_θ)))
-        
-        # Eqs.15-16: 
+
+        # Eqs.15-16:
         # S_i^d(0): the radiant flux density for downward scattered at top
-        dif = [PAR * frac_rad, NIR * frac_rad] 
+        dif = [PAR * frac_rad, NIR * frac_rad]
         # D_i^d(0): the radiant flux density for downward direct at top
-        dir = [PAR - dif[1], NIR - dif[2]]  
+        dir = [PAR - dif[1], NIR - dif[2]]
 
         # ===== 6. Two-stream radiation transfer coefficients =====
         eap = zeros(Float64, 2)
@@ -125,13 +125,16 @@ function calc_radiation(;
         coeff_C3 = zeros(Float64, 2)  # C_{3,i}
         coeff_C4 = zeros(Float64, 2)  # C_{4,i}
 
+        # Precompute exp(-F*sec*LAI) for reuse
+        exp_F_sec_L = exp(-f_leaf_orientation * sec_θ * LAI)
+
         for i in 1:2
             # Eq.9 context: exp(±a_i*L)
             eap[i] = exp(K_diffuse[i] * LAI)
             ean[i] = exp(-K_diffuse[i] * LAI)
 
             # Eq.12: direct beam attenuated through canopy
-            rad_direct_extinct = dir[i] * exp(-f_leaf_orientation * LAI * sec_θ)       # D_i^d(L)
+            rad_direct_extinct = dir[i] * exp_F_sec_L       # D_i^d(L)
 
             # Eq.C6: A_{1,i} = (1-t_i + sqrt(...)) / r_i
             coeff_A1[i] = (1.0 - TFE[i] + SRF[i]) / RFE[i]
@@ -156,17 +159,17 @@ function calc_radiation(;
 
         # ===== 7. Sunlit / shaded LAI =====
         # ? Eq.65 context: LAI_sunlit = integral of exp(-F*sec(theta)*l) dl
-        LAI_sunlit = (1.0 - exp(-f_leaf_orientation * sec_θ * LAI)) / (f_leaf_orientation * sec_θ)
+        LAI_sunlit = (1.0 - exp_F_sec_L) / (f_leaf_orientation * sec_θ)
         LAI_shade  = LAI - LAI_sunlit
 
         # ===== 8. Absorbed PAR by canopy components =====
         # Direct PAR absorbed by sunlit leaves (from Eq.12)
-        PAR_abs_sunlit_direct = dir[1] * (1.0 - exp(-f_leaf_orientation * sec_θ * LAI))  # [W/m²]
+        PAR_abs_sunlit_direct = dir[1] * (1.0 - exp_F_sec_L)  # [W/m²]
 
         # Diffuse PAR absorbed by entire canopy (from Eq.13 integral)
-        PAR_abs_diffuse_total = coeff_C1[1] * (1.0 - coeff_A1[1]) * (1.0 - exp(K_diffuse[1] * LAI)) +
-                                coeff_C2[1] * (1.0 - coeff_A2[1]) * (1.0 - exp(-K_diffuse[1] * LAI)) +
-                                (coeff_C3[1] - coeff_C4[1]) * dir[1] * (1.0 - exp(-f_leaf_orientation * sec_θ * LAI))
+        PAR_abs_diffuse_total = coeff_C1[1] * (1.0 - coeff_A1[1]) * (1.0 - eap[1]) +
+                                coeff_C2[1] * (1.0 - coeff_A2[1]) * (1.0 - ean[1]) +
+                                (coeff_C3[1] - coeff_C4[1]) * dir[1] * (1.0 - exp_F_sec_L)
         PAR_abs_diffuse_total = max(PAR_abs_diffuse_total, 0.0)
 
         # Diffuse PAR absorbed by sunlit leaves (from Eq.13 weighted by exp(-F*sec*l))
@@ -224,8 +227,8 @@ function calc_radiation(;
         end
 
         # Diffuse PAR only (no sunlit leaves)
-        PAR_abs_diffuse_total = coeff_C1[1] * (1.0 - coeff_A1[1]) * (1.0 - exp(K_diffuse[1] * LAI)) +
-                                coeff_C2[1] * (1.0 - coeff_A2[1]) * (1.0 - exp(-K_diffuse[1] * LAI))
+        PAR_abs_diffuse_total = coeff_C1[1] * (1.0 - coeff_A1[1]) * (1.0 - eap[1]) +
+                                coeff_C2[1] * (1.0 - coeff_A2[1]) * (1.0 - ean[1])
         PAR_abs_diffuse_total = max(PAR_abs_diffuse_total, 0.0)
 
         LAI_sunlit = 0.0

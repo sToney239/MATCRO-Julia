@@ -167,39 +167,21 @@ end
 # ============================================================
 # read_forcing_netcdf_spatial — load one year of spatial forcing
 # Returns Dict{doy => (tmax, tmin, rsd, prc, shm, wnd, prs)} where
-# each field is Matrix{Float64} of size (nlon, nlat)
+# Returns NamedTuple of 3D arrays (nlon, nlat, ndays) — cache-friendly layout
 # ============================================================
 function read_forcing_netcdf_spatial(config::Config, year::Int)
     nc = config.raster_vars
 
-    tmax_3d = _read_nc_spatial(nc["tmx"], year; config=config)
-    tmin_3d = _read_nc_spatial(nc["tmn"], year; config=config)
-    rsd_3d  = _read_nc_spatial(nc["rsd"], year; config=config)
-    prc_3d  = _read_nc_spatial(nc["prc"], year; config=config)
-    shm_3d  = _read_nc_spatial(nc["shm"], year; config=config)
-    wnd_3d  = _read_nc_spatial(nc["wnd"], year; config=config)
-    prs_3d  = _read_nc_spatial(nc["prs"], year; config=config)
+    tmax = _read_nc_spatial(nc["tmx"], year; config=config)
+    tmin = _read_nc_spatial(nc["tmn"], year; config=config)
+    rsd  = _read_nc_spatial(nc["rsd"], year; config=config)
+    prc  = _read_nc_spatial(nc["prc"], year; config=config)
+    shm  = _read_nc_spatial(nc["shm"], year; config=config)
+    wnd  = _read_nc_spatial(nc["wnd"], year; config=config)
+    prs  = _read_nc_spatial(nc["prs"], year; config=config)
 
-    n_lon, n_lat, n_days = size(tmax_3d)
-
-    result = Dict{Int, @NamedTuple{tmax::Matrix{Float64}, tmin::Matrix{Float64},
-                                    radiation::Matrix{Float64}, precip::Matrix{Float64},
-                                    humidity::Matrix{Float64}, wind::Matrix{Float64},
-                                    pressure::Matrix{Float64}}}()
-
-    for doy in 1:n_days
-        result[doy] = (
-            tmax      = tmax_3d[:, :, doy],
-            tmin      = tmin_3d[:, :, doy],
-            radiation = rsd_3d[:, :, doy],
-            precip    = prc_3d[:, :, doy],
-            humidity  = shm_3d[:, :, doy],
-            wind      = wnd_3d[:, :, doy],
-            pressure  = prs_3d[:, :, doy],
-        )
-    end
-
-    return result
+    return (tmax=tmax, tmin=tmin, radiation=rsd, precip=prc,
+            humidity=shm, wind=wnd, pressure=prs)
 end
 
 # ============================================================

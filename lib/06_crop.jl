@@ -234,7 +234,7 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
                                   panicle_progress_3::Float64, panicle_alloc_ratio_3::Float64,
                                   LAI_threshold_grain::Float64,
                                   k_leaf_loss::Float64,
-                                  crop_name::String)
+                                  crop_type::CropType)
     growth_progress = crop.development_stage
     glucose_pool = crop.available_glucose_pool
     glucose_pool_initial = glucose_pool
@@ -262,7 +262,7 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
     #############################################################
     # Eq.130: Shoot partition ratio (Pr,sh)
     # The proportion between total and shoot carbonhydrate
-    if crop_name == "Maize"
+    if crop_type == MAIZE
         if growth_progress < shoot_progress_1
             ratio_shoot_alloc = linear_interpolate(growth_progress, 0.0, 0.5, shoot_progress_1, 1.0 - shoot_alloc_ratio_1)
         elseif growth_progress < shoot_progress_2
@@ -270,7 +270,7 @@ function calc_growth_partitioning!(crop::CropState, net_assimilation::Float64,
         else
             ratio_shoot_alloc = 1.0
         end
-    elseif crop_name == "Rice"
+    elseif crop_type == RICE
         progress_transplant_start = 0.06     # DVS at transplanting and  (Dvs,tr)
         progress_transplant_end = 0.08       # DVS at transplanting shock ends (Dvs,te)
         if growth_progress < progress_transplant_start
@@ -406,13 +406,13 @@ end
 # S_lw: specific leaf weight [kg / m^2]
 # Eq.138: Slw = Slw,mx + (Slw,mn - Slw,mx) * exp(-kSlw * DVS)
 function calc_LAI!(crop::CropState, leaf_weight_min::Float64, leaf_weight_max::Float64,
-                   leaf_weight_decay_rate::Float64, co2_ppm::Float64, crop_name::String)
+                   leaf_weight_decay_rate::Float64, co2_ppm::Float64, crop_type::CropType)
     growth_progress = crop.development_stage
     # Eq.138: Specific leaf weight [kg/m²] (SLW)
     s_lw = leaf_weight_max + (leaf_weight_min - leaf_weight_max) * exp(-leaf_weight_decay_rate * growth_progress)
 
     # CO2 down-regulation for C3 crops
-    if crop_name != "Maize"
+    if crop_type != MAIZE
         s_lw = s_lw / ((0.856 * (1.0 + 1.035 * exp(-4.35e-3 * co2_ppm))) / (0.856 * (1.0 + 1.035 * exp(-4.35e-3 * 368.87))))
     end
 
@@ -426,10 +426,10 @@ end
 
 # ============ 8. Crop height (Eq.139) ============
 # Eq.139: hgt = haa * (DVS/hDVS) before heading; hgt = haa after heading
-function calc_height!(crop::CropState, half_progress::Float64, max_crop_height::Float64, crop_name::String)
+function calc_height!(crop::CropState, half_progress::Float64, max_crop_height::Float64, crop_type::CropType)
     growth_progress = crop.development_stage
     
-    if crop_name == "Rice"
+    if crop_type == RICE
         if growth_progress < half_progress
             height_coeff_a1 = 0.439  
             height_coeff_b1 = 0.675            
@@ -570,13 +570,13 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
                                       leaf_nitrogen_x1::Float64, leaf_nitrogen_x2::Float64, leaf_nitrogen_x3::Float64,
                                       leaf_nitrogen_max::Float64, leaf_nitrogen_min::Float64,
                                       leaf_nitrogen_sensitivity::Float64,
-                                      co2_ppm::Float64, crop_name::String)
+                                      co2_ppm::Float64, crop_type::CropType)
     growth_progress = crop.development_stage
     x1 = leaf_nitrogen_x1
     x2 = leaf_nitrogen_x2
     x3 = leaf_nitrogen_x3
 
-    if crop_name == "Rice" || crop_name == "Wheat"
+    if crop_type == RICE || crop_type == WHEAT
         y1 = 0.7742242627
         y2 = leaf_nitrogen_max - (leaf_nitrogen_max - leaf_nitrogen_min) * exp(-leaf_nitrogen_sensitivity * n_fertilizer)
         y3 = 0.5
@@ -596,7 +596,7 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
         # CO2 down-regulation (C3 crops)
         sln = sln * (1.037 - 8.33e-5 * co2_ppm) / (1.037 - 8.33e-5 * 368.87)
 
-    elseif crop_name == "Soybean"
+    elseif crop_type == SOYBEAN
         # Soybean: 4-segment piecewise (matching Fortran CALSLN)
         # Breakpoints: 0, x1=SLNX1, x2=SLNX2, x3=SLNX3, 1.0
         y0 = 0.75
@@ -620,7 +620,7 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
         # CO2 down-regulation (C3)
         sln = sln * (1.037 - 8.33e-5 * co2_ppm) / (1.037 - 8.33e-5 * 368.87)
 
-    elseif crop_name == "Maize"
+    elseif crop_type == MAIZE
         y1 = 0.5
         y2 = 2.1 - 1.4 * exp(-leaf_nitrogen_sensitivity * n_fertilizer)
         y3 = 0.0013 * n_fertilizer + 0.5295
@@ -639,59 +639,73 @@ function calc_specific_leaf_nitrogen!(crop::CropState, n_fertilizer::Float64,
         # No CO2 down-regulation for Maize (C4 crop)
 
     else
-        error("Unknown crop: $crop_name. Use Rice, Wheat, Soybean, or Maize")
+        error("Unknown crop_type: $crop_type. Use Rice, Wheat, Soybean, or Maize")
     end
 
     crop.leaf_nitrogen = sln
 end
 
-# ============ Top-level crop step function ============
-function crop_step!(crop::CropState;
+# ============ Top-level crop step function (positional args eliminate kwarg overhead) ============
+function crop_step!(crop::CropState, params::CropParameters,
                     doy::Int, hour::Float64, Δt::Int,
                     temperature::Float64, gpp::Float64, rsp::Float64,
-                    planting_doy::Int, thermal_time_requirement::Float64, half_progress::Float64,
-                    needs_vernalization::Int, base_temp::Float64,
-                    optimal_temp::Float64, ceiling_temp::Float64,
-                    vernalization_saturation::Float64,
-                    k_leaf_convert::Float64, k_stem_convert::Float64,
-                    k_root_convert::Float64, k_grain_convert::Float64,
-                    fraction_starch_reserve::Float64,
-                    
-                    # progress key breaks for different organs
-                    shoot_progress_1::Float64, 
-                    shoot_alloc_ratio_1::Float64, shoot_progress_2::Float64,
-
-                    leaf_alloc_ratio_0::Float64, 
-                    leaf_progress_1::Float64, leaf_alloc_ratio_1::Float64,
-                    leaf_progress_2::Float64, leaf_alloc_ratio_2::Float64,
-
-                    panicle_progress_1::Float64, panicle_alloc_ratio_1::Float64,
-                    panicle_progress_2::Float64, panicle_alloc_ratio_2::Float64,
-                    panicle_progress_3::Float64, panicle_alloc_ratio_3::Float64,
-
-                    dead_prgress_1::Float64, dead_ratio_1::Float64,
-                    dead_prgress_2::Float64, dead_ratio_2::Float64,
-                    dead_prgress_3::Float64, dead_ratio_3::Float64,
-                    
-                    leaf_nitrogen_x1::Float64, leaf_nitrogen_x2::Float64, leaf_nitrogen_x3::Float64,
-                    leaf_nitrogen_max::Float64, leaf_nitrogen_min::Float64,
-                    leaf_nitrogen_sensitivity::Float64,
-
-                    LAI_threshold_grain::Float64, k_leaf_loss::Float64,
-                    leaf_weight_min::Float64, leaf_weight_max::Float64,
-                    leaf_weight_decay_rate::Float64,
-                    max_crop_height::Float64,
-                    root_growth_rate::Float64, max_root_length::Float64,
-                    
-                    n_fertilizer::Float64, co2_ppm::Float64,
-                    is_irrigated::Int,
-                    cold_damage_threshold::Float64,
-                    heat_damage_threshold::Float64,
-                    harvest_index::Float64,
-                    harvest_temp_threshold::Float64,
+                    planting_doy::Int, thermal_time_requirement::Float64,
+                    n_fertilizer_amt::Float64, co2_ppm::Float64,
+                    is_irrigated::Int, max_crop_height::Float64,
                     five_day_temp_buffer::Vector{Float64},
                     five_day_temp_count::Int,
-                    crop_name::String)
+                    crop_type::CropType)
+
+    # Unpack params fields for local access
+    half_progress = params.half_progress
+    needs_vernalization = params.needs_vernalization
+    base_temp = params.base_temp
+    optimal_temp = params.optimal_temp
+    ceiling_temp = params.ceiling_temp
+    vernalization_saturation = params.vernalization_saturation
+    k_leaf_convert = params.k_leaf_convert
+    k_stem_convert = params.k_stem_convert
+    k_root_convert = params.k_root_convert
+    k_grain_convert = params.k_grain_convert
+    fraction_starch_reserve = params.fraction_starch_reserve
+    shoot_progress_1 = params.shoot_progress_1
+    shoot_alloc_ratio_1 = params.shoot_alloc_ratio_1
+    shoot_progress_2 = params.shoot_progress_2
+    leaf_alloc_ratio_0 = params.leaf_alloc_ratio_0
+    leaf_progress_1 = params.leaf_progress_1
+    leaf_alloc_ratio_1 = params.leaf_alloc_ratio_1
+    leaf_progress_2 = params.leaf_progress_2
+    leaf_alloc_ratio_2 = params.leaf_alloc_ratio_2
+    panicle_progress_1 = params.panicle_progress_1
+    panicle_alloc_ratio_1 = params.panicle_alloc_ratio_1
+    panicle_progress_2 = params.panicle_progress_2
+    panicle_alloc_ratio_2 = params.panicle_alloc_ratio_2
+    panicle_progress_3 = params.panicle_progress_3
+    panicle_alloc_ratio_3 = params.panicle_alloc_ratio_3
+    dead_prgress_1 = params.dead_progress_1
+    dead_ratio_1 = params.dead_ratio_1
+    dead_prgress_2 = params.dead_progress_2
+    dead_ratio_2 = params.dead_ratio_2
+    dead_prgress_3 = params.dead_progress_3
+    dead_ratio_3 = params.dead_ratio_3
+    leaf_nitrogen_x1 = params.leaf_nitrogen_x1
+    leaf_nitrogen_x2 = params.leaf_nitrogen_x2
+    leaf_nitrogen_x3 = params.leaf_nitrogen_x3
+    leaf_nitrogen_max = params.leaf_nitrogen_max
+    leaf_nitrogen_min = params.leaf_nitrogen_min
+    leaf_nitrogen_sensitivity = params.leaf_nitrogen_sensitivity
+    LAI_threshold_grain = params.LAI_threshold_grain
+    k_leaf_loss = params.k_leaf_loss
+    leaf_weight_min = params.leaf_weight_min
+    leaf_weight_max = params.leaf_weight_max
+    leaf_weight_decay_rate = params.leaf_weight_decay_rate
+    root_growth_rate = params.root_growth_rate
+    max_root_length = params.max_root_length
+    cold_damage_threshold = params.cold_damage_threshold
+    heat_damage_threshold = params.heat_damage_threshold
+    harvest_index = params.harvest_index
+    harvest_temp_threshold = params.harvest_temp_threshold
+    n_fertilizer = n_fertilizer_amt
 
     # 1. Judge planting
     judge_planting!(crop, doy, hour, planting_doy, is_irrigated)
@@ -719,7 +733,7 @@ function crop_step!(crop::CropState;
                                               panicle_progress_1, panicle_alloc_ratio_1,
                                               panicle_progress_2, panicle_alloc_ratio_2,
                                               panicle_progress_3, panicle_alloc_ratio_3,
-                                              LAI_threshold_grain, k_leaf_loss, crop_name)
+                                              LAI_threshold_grain, k_leaf_loss, crop_type)
 
             # 6. Update biomass
             update_biomass!(crop, growth.leaf_growth, growth.stem_growth,
@@ -728,10 +742,10 @@ function crop_step!(crop::CropState;
                            losses.leaf_loss, losses.root_loss, losses.starch_loss)
 
             # 7. LAI
-            calc_LAI!(crop, leaf_weight_min, leaf_weight_max, leaf_weight_decay_rate, co2_ppm, crop_name)
+            calc_LAI!(crop, leaf_weight_min, leaf_weight_max, leaf_weight_decay_rate, co2_ppm, crop_type)
 
             # 8. Height
-            calc_height!(crop, half_progress, max_crop_height, crop_name)
+            calc_height!(crop, half_progress, max_crop_height, crop_type)
 
             # 9. Root length
             calc_root_length!(crop, root_growth_rate, max_root_length, Δt)
@@ -760,7 +774,7 @@ function crop_step!(crop::CropState;
     # 13. Specific leaf nitrogen (always calculated)
     calc_specific_leaf_nitrogen!(crop, n_fertilizer, leaf_nitrogen_x1, leaf_nitrogen_x2, leaf_nitrogen_x3,
                                  leaf_nitrogen_max, leaf_nitrogen_min, leaf_nitrogen_sensitivity,
-                                 co2_ppm, crop_name)
+                                 co2_ppm, crop_type)
 
     return crop
 end

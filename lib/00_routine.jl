@@ -35,7 +35,7 @@ end
 # Runs: interpolate_time → 5-day buffer → radiation → photosynthesis
 #       → crop_step! → soil_water → water_stress update
 # ============================================================
-function run_hourly_step!(crop, params, doy, hour, Δt, lat, crop_name,
+function run_hourly_step!(crop, params, doy, hour, Δt, lat, crop_type::CropType,
                           # Forcing (from interpolate_time output)
                           tmp_K, wnd, prc, rsd, shm, prs,
                           co2_ppm, water_stress,
@@ -63,7 +63,7 @@ function run_hourly_step!(crop, params, doy, hour, Δt, lat, crop_name,
         lat=lat,
         doy=doy,
         hour=hour,
-        crop_name=crop_name,
+        crop_type=crop_type,
         development_stage=crop.development_stage
     )
 
@@ -87,75 +87,23 @@ function run_hourly_step!(crop, params, doy, hour, Δt, lat, crop_name,
         btheta=params.b_theta,
         m_H2O=params.m_H2O,
         b_H2O=params.b_H2O,
-        crop_name=crop_name
+        crop_type=crop_type
     )
 
     gpp = phsyn_result.gpp
     rsp = phsyn_result.rsp
     tsp = phsyn_result.tsp
 
-    # ----- CROP (growth simulation) -----
-    crop_step!(crop;
-        doy=doy, hour=hour, Δt=Δt,
-        temperature=tmp_K, gpp=gpp, rsp=rsp,
-        planting_doy=mgmt.planting_doy + Int(params.planting_offset),
-        thermal_time_requirement=mgmt.thermal_time_requirement,
-        half_progress=params.half_progress,
-        needs_vernalization=params.needs_vernalization,
-        base_temp=params.base_temp,
-        optimal_temp=params.optimal_temp,
-        ceiling_temp=params.ceiling_temp,
-        vernalization_saturation=params.vernalization_saturation,
-        k_leaf_convert=params.k_leaf_convert,
-        k_stem_convert=params.k_stem_convert,
-        k_root_convert=params.k_root_convert,
-        k_grain_convert=params.k_grain_convert,
-        fraction_starch_reserve=params.fraction_starch_reserve,
-        shoot_progress_1=params.shoot_progress_1,
-        shoot_alloc_ratio_1=params.shoot_alloc_ratio_1,
-        shoot_progress_2=params.shoot_progress_2,
-        leaf_alloc_ratio_0=params.leaf_alloc_ratio_0,
-        leaf_progress_1=params.leaf_progress_1,
-        leaf_alloc_ratio_1=params.leaf_alloc_ratio_1,
-        leaf_progress_2=params.leaf_progress_2,
-        leaf_alloc_ratio_2=params.leaf_alloc_ratio_2,
-        panicle_progress_1=params.panicle_progress_1,
-        panicle_alloc_ratio_1=params.panicle_alloc_ratio_1,
-        panicle_progress_2=params.panicle_progress_2,
-        panicle_alloc_ratio_2=params.panicle_alloc_ratio_2,
-        panicle_progress_3=params.panicle_progress_3,
-        panicle_alloc_ratio_3=params.panicle_alloc_ratio_3,
-        dead_prgress_1=params.dead_progress_1,
-        dead_ratio_1=params.dead_ratio_1,
-        dead_prgress_2=params.dead_progress_2,
-        dead_ratio_2=params.dead_ratio_2,
-        dead_prgress_3=params.dead_progress_3,
-        dead_ratio_3=params.dead_ratio_3,
-        leaf_nitrogen_x1=params.leaf_nitrogen_x1,
-        leaf_nitrogen_x2=params.leaf_nitrogen_x2,
-        leaf_nitrogen_x3=params.leaf_nitrogen_x3,
-        leaf_nitrogen_max=params.leaf_nitrogen_max,
-        leaf_nitrogen_min=params.leaf_nitrogen_min,
-        leaf_nitrogen_sensitivity=params.leaf_nitrogen_sensitivity,
-        LAI_threshold_grain=params.LAI_threshold_grain,
-        k_leaf_loss=params.k_leaf_loss,
-        leaf_weight_min=params.leaf_weight_min,
-        leaf_weight_max=params.leaf_weight_max,
-        leaf_weight_decay_rate=params.leaf_weight_decay_rate,
-        max_crop_height=mgmt.max_crop_height,
-        root_growth_rate=params.root_growth_rate,
-        max_root_length=params.max_root_length,
-        n_fertilizer=mgmt.n_fertilizer,
-        co2_ppm=co2_ppm,
-        is_irrigated=mgmt.is_irrigated,
-        cold_damage_threshold=params.cold_damage_threshold,
-        heat_damage_threshold=params.heat_damage_threshold,
-        harvest_index=params.harvest_index,
-        harvest_temp_threshold=params.harvest_temp_threshold,
-        five_day_temp_buffer=five_day_buffer,
-        five_day_temp_count=five_day_count,
-        crop_name=crop_name
-    )
+    # ----- CROP (growth simulation) — positional args -----
+    crop_step!(crop, params,
+        doy, hour, Δt,
+        tmp_K, gpp, rsp,
+        mgmt.planting_doy + Int(params.planting_offset),
+        mgmt.thermal_time_requirement,
+        mgmt.n_fertilizer, co2_ppm,
+        mgmt.is_irrigated, mgmt.max_crop_height,
+        five_day_buffer, five_day_count,
+        crop_type)
 
     # ----- SOIL (water balance) -----
     tsp_W = tsp * L_vaporization
@@ -173,7 +121,7 @@ function run_hourly_step!(crop, params, doy, hour, Δt, lat, crop_name,
         specific_humidity=shm,
         crop_height=crop.crop_height,
         is_planted=crop.is_planted,
-        crop_name=crop_name
+        crop_type=crop_type
     )
 
     return soil_result.water_stress, five_day_count
@@ -280,7 +228,7 @@ function run_point_simulation(config::Config)
 
                 buffer_len = 86400 ÷ Δt * 5
                 water_stress, five_day_count = run_hourly_step!(
-                    crop, params, doy, hour, Δt, config.latitude, config.crop_name,
+                    crop, params, doy, hour, Δt, config.latitude, config.crop_type,
                     tmp_K, wnd, prc, rsd, shm, prs,
                     co2_ppm, water_stress,
                     layer_water, five_day_buffer, five_day_count, buffer_len,
@@ -455,7 +403,7 @@ function run_spatial_simulation(config::Config)
 
         # Read spatial forcing (full year)
         spatial_forcing = read_forcing_netcdf_spatial(config, year)
-        n_days = length(spatial_forcing)
+        n_days = size(spatial_forcing.tmax, 3)
 
         # Read management params for this year (from NC files or defaults)
         planting_doy_field = load_management_param(config, "planting_doy", year, n_lon, n_lat; lats=lats, lons=lons)
@@ -629,44 +577,51 @@ end
 
 # ============================================================
 # run_pixel_spatial — run MATCRO for a single pixel in spatial mode
+# spatial_forcing is a NamedTuple of 3D arrays (cache-friendly, no Dict overhead)
 # ============================================================
 function run_pixel_spatial(config::Config, params::CropParameters,
                            year::Int, lat::Float64, lon::Float64,
-                           spatial_forcing::Dict, n_days::Int, co2_ppm::Float64,
+                           spatial_forcing::NamedTuple, n_days::Int, co2_ppm::Float64,
                            mgmt::ManagementParams;
                            i_lon::Int=1, i_lat::Int=1)
     # Initialize simulation state
     Δt = config.time_step
     crop, layer_water, water_stress, five_day_buffer, five_day_count = init_simulation_state(Δt)
     buffer_len = 86400 ÷ Δt * 5
+    latrad = 2π * lat / 360.0
 
     for doy in config.start_doy:min(config.end_doy, n_days)
-        weather_spatial = spatial_forcing[doy]
-        weather_today = DailyForcing(;
-            doy=doy,
-            tmax=weather_spatial.tmax[i_lon, i_lat], tmin=weather_spatial.tmin[i_lon, i_lat],
-            radiation=weather_spatial.radiation[i_lon, i_lat], precip=weather_spatial.precip[i_lon, i_lat],
-            humidity=weather_spatial.humidity[i_lon, i_lat], wind=weather_spatial.wind[i_lon, i_lat],
-            pressure=weather_spatial.pressure[i_lon, i_lat],
-        )
+        # Read pixel weather directly from 3D arrays (no Dict lookup, no DailyForcing)
+        tmax_d = spatial_forcing.tmax[i_lon, i_lat, doy]
+        tmin_d = spatial_forcing.tmin[i_lon, i_lat, doy]
+        radiation_d = spatial_forcing.radiation[i_lon, i_lat, doy]
+        precip_d = spatial_forcing.precip[i_lon, i_lat, doy]
+        humidity_d = spatial_forcing.humidity[i_lon, i_lat, doy]
+        wind_d = spatial_forcing.wind[i_lon, i_lat, doy]
+        pressure_d = spatial_forcing.pressure[i_lon, i_lat, doy]
+
+        # Precompute solar geometry per day
+        prev_doy_val = (doy == 1 ? n_days : doy - 1)
+        del = solar_declination(doy)
+        del_prev = solar_declination(prev_doy_val)
         int_sinb = calc_int_sinb(doy, lat, Δt)
+
         n_steps = 86400 ÷ Δt
 
         for ihour in 1:n_steps
             hour = (Float64(ihour) - 0.5) * Float64(Δt) / 3600.0
 
-            # ----- Time interpolation -----
-            # Spatial mode: use same-day tmax/tmin for prev/next (no adjacent-day data)
             hourly = interpolate_time(;
-                doy=doy, prev_doy=(doy == 1 ? n_days : doy - 1),
+                doy=doy, prev_doy=prev_doy_val,
                 next_doy=(doy == n_days ? 1 : doy + 1),
                 hour=hour, lat=lat, Δt=Δt,
-                tmax_prev=weather_today.tmax, tmax=weather_today.tmax, tmax_next=weather_today.tmax,
-                tmin_prev=weather_today.tmin, tmin=weather_today.tmin, tmin_next=weather_today.tmin,
-                radiation=weather_today.radiation, precip=weather_today.precip,
-                humidity=weather_today.humidity, wind=weather_today.wind,
-                pressure=weather_today.pressure, ozone=weather_today.ozone,
+                tmax_prev=tmax_d, tmax=tmax_d, tmax_next=tmax_d,
+                tmin_prev=tmin_d, tmin=tmin_d, tmin_next=tmin_d,
+                radiation=radiation_d, precip=precip_d,
+                humidity=humidity_d, wind=wind_d,
+                pressure=pressure_d, ozone=0.0,
                 int_sinb=int_sinb, wind_height=mgmt.wind_height,
+                del=del, del_prev=del_prev, latrad=latrad,
             )
 
             tmp_K = hourly.temperature
@@ -677,7 +632,7 @@ function run_pixel_spatial(config::Config, params::CropParameters,
             prs = hourly.pressure
 
             water_stress, five_day_count = run_hourly_step!(
-                crop, params, doy, hour, Δt, lat, config.crop_name,
+                crop, params, doy, hour, Δt, lat, config.crop_type,
                 tmp_K, wnd, prc, rsd, shm, prs,
                 co2_ppm, water_stress,
                 layer_water, five_day_buffer, five_day_count, buffer_len,

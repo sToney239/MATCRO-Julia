@@ -1,5 +1,8 @@
 # constants.jl - Shared constants (from Fortran param.inc)
 
+# Crop type enum for type-stable dispatch (replaces String crop_name)
+@enum CropType RICE=1 WHEAT=2 SOYBEAN=3 MAIZE=4
+
 const seconds_per_day = 86400.0 # how many seconds in a day
 
 
@@ -20,7 +23,12 @@ const ρ_water = 1000.0      # density of water [kg/m³]
 
 # ============ shared functions ============
 # saturation_vapor_pressure: saturation specific humidity
-function saturation_vapor_pressure(T::Float64, P::Float64)::Float64
+@inline function saturation_vapor_pressure(T::Float64, P::Float64)::Float64
     sgn = T >= T_ice ? 1.0 : -1.0
     return ε_v * es0 / P * exp((L_vaporization + L_melt / 2 * (1 - sgn)) / R_vap * (1 / T_ice - 1 / T))
 end
+
+# Solar constant and related astronomy constants (precomputed for performance)
+const SOLAR_CONSTANT = 1370.0  # extraterrestrial radiation [W/m2]
+const EARTH_OBLIQUITY = sin(23.45 * 2π / 360)  # sin of obliquity angle
+const PI_2 = 2π  # 2π for common use

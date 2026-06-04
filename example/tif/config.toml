@@ -74,5 +74,5 @@ file = "data/tif/thermal_time_requirement.tif"
 
 # Boundary filter (optional)
 [spatial_simulation.boundary]
-file = "../../data/boundaries/cornbelt_states.geojson"
+file = "data/cornbelt_states.geojson"
 buffer_deg = 0.01

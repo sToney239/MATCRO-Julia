@@ -26,7 +26,7 @@ function calc_photosynthesis(;
     btheta::Float64,              # Collatz coupling parameter (co-limitation vs TPU/PEP)
     m_H2O::Float64 = 4.0,        # Ball-Berry slope (H2O)
     b_H2O::Float64 = 0.04,       # Ball-Berry intercept (H2O)
-    crop_name::String = "Soybean")  # Crop name: "Rice","Wheat","Soybean","Maize"
+    crop_type::CropType = SOYBEAN)  # Crop type enum for type-stable dispatch
 
     LAI_total = LAI_sunlit + LAI_shade
 
@@ -34,13 +34,14 @@ function calc_photosynthesis(;
         return (gpp=0.0, rsp=0.0, tsp=0.0)
     end
 
-    # Select leaf-level function based on crop type
-    photosynthesis_function = crop_name == "Maize" ? leaf_photosynthesis_c4 : leaf_photosynthesis_c3
+    # Select leaf-level function based on crop type (C3 vs C4)
+    # Use union splitting: Julia generates 2 specialized code paths
+    phsyn_func = crop_type == MAIZE ? leaf_photosynthesis_c4 : leaf_photosynthesis_c3
 
     # ----- Sunlit leaves -----
-    # both C3 & C4 leaves us Vmax25_sunlit
+    # both C3 & C4 leaves use Vmax25_sunlit
     if LAI_sunlit > 0.0
-        r_sun = photosynthesis_function(;
+        r_sun = phsyn_func(;
             leaf_temperature=leaf_temperature, wind_speed=wind_speed,
             specific_humidity=specific_humidity, pressure=pressure,
             co2_ppm=co2_ppm, water_stress=water_stress,
@@ -54,9 +55,9 @@ function calc_photosynthesis(;
     # ----- Shade leaves -----
     # C3: shade leaves use Vmax25_shade
     # C4: shade leaves use Vmax25_sunlit
-    Vmax25_shade_eff = crop_name == "Maize" ? Vmax25_sunlit : Vmax25_shade
+    Vmax25_shade_eff = crop_type == MAIZE ? Vmax25_sunlit : Vmax25_shade
     if LAI_shade > 0.0
-        r_shade = photosynthesis_function(;
+        r_shade = phsyn_func(;
             leaf_temperature=leaf_temperature, wind_speed=wind_speed,
             specific_humidity=specific_humidity, pressure=pressure,
             co2_ppm=co2_ppm, water_stress=water_stress,
