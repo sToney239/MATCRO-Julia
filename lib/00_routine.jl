@@ -588,9 +588,9 @@ function run_spatial_simulation(config::Config)
                                 pct = round(Int, done / n_valid * 100)
                                 bar_len = 25
                                 filled = done * bar_len ÷ n_valid
-                                bar = repeat("=", max(0, filled - 1)) * (filled > 0 ? ">" : "")
-                                bar *= repeat(" ", max(0, bar_len - filled))
-                                print("\r    [", bar, "] ", pct, "%")
+                                bar = repeat("=", max(0, filled))
+                                bar *= repeat(" ", max(0, bar_len - filled-1))
+                                print("\r    [", bar,"] ", pct, "%")
                                 flush(stdout)
                             end
                         end
@@ -628,7 +628,7 @@ function run_spatial_simulation(config::Config)
 
         # Print timing
         year_elapsed = time() - year_start_time
-        if year_elapsed < 120
+        if year_elapsed < 180
             @printf("    Year %d completed in %.1f seconds\n", year, year_elapsed)
         elseif year_elapsed < 3600
             @printf("    Year %d completed in %.1f minutes\n", year, year_elapsed/60)

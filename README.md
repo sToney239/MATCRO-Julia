@@ -2,9 +2,9 @@
 
 This is the Julia version of the MATCRO crop model, originally written in Fortran. For model details, please refer to:
 
-- Masutomi, Y., Usui, K., Manaka, T., Nishimori, M., Shimizu, M., Takimoto, K., and Arai, A.: Development of a model (MATCRO) for simulating the effects of climate change on regional crop production, Geosci. Model Dev., 9, 4133–4150, https://doi.org/10.5194/gmd-9-4133-2016, 2016.
-- Masutomi, Y.: Improvement of MATCRO model for climate change impact assessment on global crop production, EGUsphere [preprint], https://doi.org/10.5194/egusphere-2025-1885, 2025.
-- Masutomi, Y.: MATCRO-SOM: a new soil organic matter model considering priming effects for climate change impact assessment on global crop production, Geosci. Model Dev., 18, 8801–8826, https://doi.org/10.5194/gmd-18-8801-2025, 2025.
+- Masutomi, Y., Ono, K., Mano, M., Maruyama, A., and Miyata, A.: A land surface model combined with a crop growth model for paddy rice (MATCRO-Rice v. 1) – Part 1: Model description, Geosci. Model Dev., 9, 4133–4154, https://doi.org/10.5194/gmd-9-4133-2016, 2016. 
+- Nagata, M., Yusara, A., Kato, T., and Masutomi, Y.: Development of the global maize  production model MATCRO-Maize version 1.0, EGUsphere [preprint],   https://doi.org/10.5194/egusphere-2025-1885, 2025.        
+- Yusara, A., Kato, T., Ainsworth, E. A., Battisti, R., Kumagai, E., Nakano, S., Wu, Y., Tsutsumi-Morita, Y., Kobayashi, K., and Masutomi, Y.: Developing an eco-physiological process-based model of soybean growth and yield (MATCRO-Soy v.1): model calibration and evaluation, Geosci. Model Dev., 18, 8801–8826, https://doi.org/10.5194/gmd-18-8801-2025, 2025. 
 
 > **Warning:** Only the modules of Maize and Soybeans have been cross-validated against the original Fortran code with acceptable precision (error < 0.01%), for rice and wheats, currently no test has been done.
 

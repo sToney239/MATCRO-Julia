@@ -1,7 +1,7 @@
 name = "MATCRO-Julia"
 uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 authors = ["MATCRO Team"]
-version = "0.1.0"
+version = "0.1.5"
 
 [deps]
 ArchGDAL = "c9ce4bd3-c3d5-55b8-8973-c0e20141b8c3"
