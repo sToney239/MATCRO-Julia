@@ -25,7 +25,7 @@ data/
 fortran/
 
 # Test (all contents)
-test/
+test_prev/
 
 marp/
 
