@@ -448,6 +448,24 @@ function run_spatial_simulation(config::Config)
         end
     end
 
+    # Load management params (static, read once before year loop)
+    planting_doy_field, planting_cov, pd_dflt = load_management_param(config, "planting_doy", config.start_year, n_lon, n_lat; lats=lats, lons=lons)
+    is_irrigated_field, irrig_cov, irr_dflt = load_management_param(config, "is_irrigated", config.start_year, n_lon, n_lat; lats=lats, lons=lons)
+    soil_type_field, soil_cov, st_dflt = load_management_param(config, "soil_type", config.start_year, n_lon, n_lat; lats=lats, lons=lons)
+    n_fertilizer_field, nfert_cov, nf_dflt = load_management_param(config, "n_fertilizer", config.start_year, n_lon, n_lat; lats=lats, lons=lons)
+    thermal_time_field, therm_cov, tt_dflt = load_management_param(config, "thermal_time_requirement", config.start_year, n_lon, n_lat; lats=lats, lons=lons)
+
+    # Coverage check: warn if boundary pixels not covered by source data (once)
+    for (field, cov, name, dflt) in [
+        (planting_doy_field, planting_cov, "planting_doy", pd_dflt),
+        (is_irrigated_field, irrig_cov, "is_irrigated", irr_dflt),
+        (soil_type_field, soil_cov, "soil_type", st_dflt),
+        (n_fertilizer_field, nfert_cov, "n_fertilizer", nf_dflt),
+        (thermal_time_field, therm_cov, "thermal_time_requirement", tt_dflt),
+    ]
+        _check_management_coverage(field, cov, dflt, name, boundary_mask)
+    end
+
     for (i_year, year) in enumerate(years)
         println("\n  Year $year ...")
         year_start_time = time()
@@ -456,13 +474,6 @@ function run_spatial_simulation(config::Config)
         # Read spatial forcing (full year)
         spatial_forcing = read_forcing_netcdf_spatial(config, year)
         n_days = size(spatial_forcing.tmax, 3)
-
-        # Read management params for this year (from NC files or defaults)
-        planting_doy_field = load_management_param(config, "planting_doy", year, n_lon, n_lat; lats=lats, lons=lons)
-        is_irrigated_field = load_management_param(config, "is_irrigated", year, n_lon, n_lat; lats=lats, lons=lons)
-        soil_type_field = load_management_param(config, "soil_type", year, n_lon, n_lat; lats=lats, lons=lons)
-        n_fertilizer_field = load_management_param(config, "n_fertilizer", year, n_lon, n_lat; lats=lats, lons=lons)
-        thermal_time_field = load_management_param(config, "thermal_time_requirement", year, n_lon, n_lat; lats=lats, lons=lons)
 
         # Initialize output arrays for this year
         yield_2d = Array{Float64,2}(undef, n_lon, n_lat)

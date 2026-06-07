@@ -232,16 +232,17 @@ function load_management_param(config::Config, param_name::String, year::Int,
 
         if !isfile(filepath)
             @warn "Management param file not found: $filepath, using default=$default_val"
-            return fill(default_val, n_lon, n_lat)
+            return fill(default_val, n_lon, n_lat), falses(n_lon, n_lat), default_val
         end
 
         # Check if file is TIF based on extension
         if endswith(lowercase(filepath), ".tif") || endswith(lowercase(filepath), ".tiff")
             if lats === nothing || lons === nothing
                 @warn "TIF management param requires lat/lon info, using default=$default_val"
-                return fill(default_val, n_lon, n_lat)
+                return fill(default_val, n_lon, n_lat), falses(n_lon, n_lat), default_val
             end
-            return _load_management_tif(filepath, lats, lons, default_val)
+            data, covered = _load_management_tif(filepath, lats, lons, default_val)
+            return data, covered, default_val
         end
 
         ds = Dataset(filepath)
@@ -305,7 +306,7 @@ function load_management_param(config::Config, param_name::String, year::Int,
                 else
                     @warn "No suitable year found in management param '$param_name' ($filepath) for simulation year $year, using default=$default_val"
                     close(ds)
-                    return fill(default_val, n_lon, n_lat)
+                    return fill(default_val, n_lon, n_lat), falses(n_lon, n_lat), default_val
                 end
             end
         else
@@ -319,32 +320,18 @@ function load_management_param(config::Config, param_name::String, year::Int,
         data .= data .* scale_factor .+ add_offset
 
         # Reindex lat dimension to match grid (forcing) lat ordering
-        # Management NC files may have lat descending while forcing/grid has ascending
-        # Flip when: NC is descending AND grid is ascending (or vice versa)
         if lats !== nothing && size(data, 2) == length(lats)
             grid_lat_ascending = lats[1] < lats[end]
-            # Flip if: (NC descending AND grid ascending) OR (NC ascending AND grid descending)
             should_flip = (nc_lat_descending && grid_lat_ascending) || (!nc_lat_descending && !grid_lat_ascending)
             if should_flip
                 data = data[:, end:-1:1]
             end
         end
 
-        # Bbox coverage check: warn if management NC does not fully cover weather grid
-        if lats !== nothing && lons !== nothing && length(nc_lat_vals) >= 2
-            nc_lon_min, nc_lon_max = extrema(nc_lon_vals)
-            nc_lat_min, nc_lat_max = nc_lat_descending ? (nc_lat_vals[end], nc_lat_vals[1]) : (nc_lat_vals[1], nc_lat_vals[end])
-            grid_lon_min, grid_lon_max = extrema(lons)
-            grid_lat_min, grid_lat_max = extrema(lats)
-            if nc_lon_min > grid_lon_min || nc_lon_max < grid_lon_max ||
-               nc_lat_min > grid_lat_min || nc_lat_max < grid_lat_max
-                @warn "Management param '$param_name' ($filepath) extent does not fully cover weather grid — uncovered pixels using default values"
-            end
-        end
-
-        return data
+        return data, trues(n_lon, n_lat), default_val
     else
-        return fill(default_val, n_lon, n_lat)
+        @info "$param_name: no file specified, using default=$default_val everywhere"
+        return fill(default_val, n_lon, n_lat), trues(n_lon, n_lat), default_val
     end
 end
 
@@ -354,7 +341,7 @@ end
 # ============================================================
 function _load_management_tif(filepath::String,
                               target_lats::Vector{Float64}, target_lons::Vector{Float64},
-                              default_val::Float64)::Matrix{Float64}
+                              default_val::Float64)
     AG.read(filepath) do dataset
         _extract_tif_band(dataset, 1, target_lons, target_lats, default_val)
     end
@@ -366,7 +353,7 @@ end
 function _extract_tif_band(dataset, band_idx::Int,
                             target_lons::Vector{Float64},
                             target_lats::Vector{Float64},
-                            default_val::Float64)::Matrix{Float64}
+                            default_val::Float64)
     n_lon = length(target_lons)
     n_lat = length(target_lats)
     band = AG.getband(dataset, band_idx)
@@ -376,34 +363,18 @@ function _extract_tif_band(dataset, band_idx::Int,
     x_origin = gt[1]; pixel_w = gt[2]
     y_origin = gt[4]; pixel_h = gt[6]
 
-    # Bbox check
-    tif_xmin = x_origin
-    tif_xmax = x_origin + tif_width * pixel_w
-    tif_ymin = y_origin + tif_height * pixel_h
-    tif_ymax = y_origin
-
-    nc_xmin = minimum(target_lons) - (target_lons[2] - target_lons[1]) / 2
-    nc_xmax = maximum(target_lons) + (target_lons[2] - target_lons[1]) / 2
-    nc_ymin = minimum(target_lats) - (target_lats[1] - target_lats[2]) / 2
-    nc_ymax = maximum(target_lats) + (target_lats[1] - target_lats[2]) / 2
-
-    if tif_xmin > nc_xmin || tif_xmax < nc_xmax || tif_ymin > nc_ymin || tif_ymax < nc_ymax
-        @warn "Management TIF bbox does not fully cover NC grid — some pixels may use defaults"
-    end
-
     result = fill(default_val, n_lon, n_lat)
-    # Read entire band first, then index
+    covered = falses(n_lon, n_lat)
     tif_data = Float64.(AG.read(band))
     for i_lon in 1:n_lon, i_lat in 1:n_lat
-        # GeoTIFF: pixel center at (x_origin + pixel_w*(col-0.5), y_origin + pixel_h*(row-0.5))
         col = round(Int, (target_lons[i_lon] - x_origin) / pixel_w + 0.5)
         row = round(Int, (target_lats[i_lat] - y_origin) / pixel_h + 0.5)
         if 1 <= col <= tif_width && 1 <= row <= tif_height
-            # tif_data is [col, row] = [lon, lat]
             result[i_lon, i_lat] = tif_data[col, row]
+            covered[i_lon, i_lat] = true
         end
     end
-    return result
+    return result, covered
 end
 
 # ============================================================
@@ -804,5 +775,43 @@ function _create_boundary_mask_tif(lons::Vector{Float64}, lats::Vector{Float64},
         end
 
         return mask
+    end
+end
+
+# ============================================================
+# _check_management_coverage — warn if boundary-masked pixels
+# are NOT covered by management source data (not in TIF bbox / NC extent)
+# ============================================================
+function _check_management_coverage(data::Matrix{Float64}, covered::BitMatrix,
+                                     default_val::Float64, param_name::String,
+                                     boundary_mask::Union{Matrix{Bool},Nothing})
+    mask = if boundary_mask !== nothing
+        boundary_mask
+    else
+        trues(size(data))
+    end
+    n_mask = sum(mask)
+    n_mask == 0 && return
+    n_uncovered = 0
+    # 0 is valid for binary/count params; only -9999 is the sentinel for those
+    zero_is_ok = param_name == "is_irrigated"
+    n_sentinel = 0
+    for i in eachindex(data)
+        mask[i] || continue
+        if !covered[i]
+            n_uncovered += 1
+        elseif data[i] == -9999.0 || (!zero_is_ok && data[i] == 0.0)
+            n_sentinel += 1
+        end
+    end
+    if n_uncovered > 0
+        pct = n_uncovered / n_mask * 100
+        printstyled(stderr, "[ Warn: ", color=:yellow)
+        println("$param_name: $(n_uncovered)/$(n_mask) ($(round(pct, digits=1))%) pixels NOT COVERED by source data — using default=$default_val")
+    end
+    if n_sentinel > 0 && n_uncovered == 0 && n_sentinel < n_mask
+        pct = n_sentinel / n_mask * 100
+        printstyled(stderr, "[ Warn: ", color=:yellow)
+        println("$param_name: $(n_sentinel)/$(n_mask) ($(round(pct, digits=1))%) pixels have value 0 or -9999")
     end
 end
