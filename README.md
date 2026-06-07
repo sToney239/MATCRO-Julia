@@ -40,6 +40,11 @@ Pkg.instantiate()   # install all dependencies from Project.toml
 
 Or install individually:
 
+```julia
+using Pkg
+Pkg.add(["CSV", "DataFrames", "NCDatasets", "ArchGDAL", "JSON"])
+```
+
 | Package | Required for |
 |---------|-------------|
 | `CSV` | Point (CSV) mode |

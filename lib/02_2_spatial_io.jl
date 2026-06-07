@@ -330,7 +330,8 @@ function load_management_param(config::Config, param_name::String, year::Int,
 
         return data, trues(n_lon, n_lat), default_val
     else
-        @info "$param_name: no file specified, using default=$default_val everywhere"
+        printstyled(stderr, "    [Info: ", color=:blue)
+        println("$param_name: no file specified, using default=$default_val")
         return fill(default_val, n_lon, n_lat), trues(n_lon, n_lat), default_val
     end
 end
@@ -806,12 +807,12 @@ function _check_management_coverage(data::Matrix{Float64}, covered::BitMatrix,
     end
     if n_uncovered > 0
         pct = n_uncovered / n_mask * 100
-        printstyled(stderr, "[ Warn: ", color=:yellow)
+        printstyled(stderr, "    [Warn: ", color=:yellow)
         println("$param_name: $(n_uncovered)/$(n_mask) ($(round(pct, digits=1))%) pixels NOT COVERED by source data — using default=$default_val")
     end
     if n_sentinel > 0 && n_uncovered == 0 && n_sentinel < n_mask
         pct = n_sentinel / n_mask * 100
-        printstyled(stderr, "[ Warn: ", color=:yellow)
+        printstyled(stderr, "    [Warn: ", color=:yellow)
         println("$param_name: $(n_sentinel)/$(n_mask) ($(round(pct, digits=1))%) pixels have value 0 or -9999")
     end
 end
